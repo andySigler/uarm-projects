@@ -1,0 +1,1 @@
+git+git://github.com/andySigler/uArm-Python-SDK.git@uarm-tests#egg=uArm-Python-SDK
