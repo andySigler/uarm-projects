@@ -27,5 +27,5 @@ cd ..
 Make sure the uArm Swift Pro device is powered on and connected to your computer. Also, that no other software is connected to its serial port.
 
 ```
-python test.py
+python uarm_test.py
 ```
