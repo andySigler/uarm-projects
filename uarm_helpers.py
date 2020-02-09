@@ -4,23 +4,29 @@ from serial.tools.list_ports import comports
 from uarm.wrapper import SwiftAPI
 
 
+# SERIAL PORT
 UARM_USB_HWID = '2341:0042'
 
+# SPEED
 UARM_MAX_SPEED = 250
 UARM_MIN_SPEED = 1
+UARM_DEFAULT_SPEED = UARM_MAX_SPEED / 2
 
+# ACCELERATION
 UARM_MAX_ACCELERATION = 50
 UARM_MIN_ACCELERATION = 0.01
+UARM_DEFAULT_ACCELERATION = 10
 
-UARM_DEFAULT_SPEED = UARM_MAX_SPEED / 2
-UARM_DEFAULT_ACCELERATION = 1.3
+# WRIST ANGLE
+UARM_MIN_WRIST_ANGLE = 0
+UARM_MAX_WRIST_ANGLE = 180
+UARM_DEFAULT_WRIST_ANGLE = 90
+UARM_DEFAULT_WRIST_SLEEP = 0.25
 
-UARM_SAFE_SPEED = 20
-UARM_SAFE_ACCELERATION = UARM_DEFAULT_ACCELERATION
-
-UARM_X_MIN = 105
-
-UARM_SAFE_POS = {
+# HOMING
+UARM_HOME_SPEED = 10
+UARM_HOME_ACCELERATION = 1.3
+UARM_HOME_POS = {
   'x': 110, 'y': 0, 'z': 40
 }
 
@@ -36,9 +42,7 @@ def _serial_attempt_connect(port_info, verbose=False):
   if (port_info.hwid and UARM_USB_HWID in port_info.hwid):
     try:
       swift = SwiftAPIExtended(
-        filters={'hwid': port_info.hwid}, do_not_open=True, verbose=verbose)
-      swift.connect()
-      swift.wait()
+        filters={'hwid': port_info.hwid}, verbose=verbose)
       return swift
     except Exception as e:
       print(e)
@@ -74,14 +78,17 @@ class SwiftAPIExtended(SwiftAPI):
       'base': 0,
       'shoulder': 1,
       'elbow': 2,
-      'servo': 3
+      'wrist': 3
     }
     self._speed = UARM_DEFAULT_SPEED
     self._acceleration = UARM_DEFAULT_ACCELERATION
+    self._wrist_angle = UARM_DEFAULT_WRIST_ANGLE
     self._pos = {'x': 0, 'y': 0, 'z': 0} # run self.home() to get real position
-    super().__init__(**kwargs)
+    super().__init__(**kwargs) # raises Exception if port is incorrect
+    self.setup()
+    self.update_position()
 
-  def log_verbose(self, msg):
+  def _log_verbose(self, msg):
     if self._verbose:
       print(msg)
 
@@ -89,27 +96,46 @@ class SwiftAPIExtended(SwiftAPI):
   SETTINGS and MODES
   '''
 
-  def wait(self, timeout=5):
-    self.waiting_ready(timeout=5)
+  def setup(self):
+    self._log_verbose('setup')
+    self.flush_cmd()
+    self.waiting_ready()
+    self.set_speed_factor(1.0)
+    self.mode_general()
+    return self
+
+  def wait_for_arrival(self, timeout=5):
+    self._log_verbose('wait')
+    start_time = time.time()
+    self.waiting_ready(timeout=timeout)
+    while time.time() - start_time < timeout:
+      # sending these commands while moving will make uArm much less smooth
+      self.move_to(**self._pos)
+      time.sleep(0.2)
+      if not self.get_is_moving(wait=True):
+        return self
+    raise TimeoutError(
+      'Unable to reach target position {0} within {1} seconds'.format(
+        self._pos, timeout))
 
   def mode_general(self):
-    self.log_verbose('mode_general')
+    self._log_verbose('mode_general')
     self.set_mode(self._modes['general'])
     return self
 
   def speed(self, speed):
-    self.log_verbose('speed: {0}'.format(speed))
+    self._log_verbose('speed: {0}'.format(speed))
     if speed < UARM_MIN_SPEED:
       speed = UARM_MIN_SPEED
-      self.log_verbose('speed changed to: {0}'.format(speed))
+      self._log_verbose('speed changed to: {0}'.format(speed))
     if speed > UARM_MAX_SPEED:
       speed = UARM_MAX_SPEED
-      self.log_verbose('speed changed to: {0}'.format(speed))
+      self._log_verbose('speed changed to: {0}'.format(speed))
     self._speed = speed
     return self
 
   def speed_percentage(self, percentage):
-    self.log_verbose('speed_percentage: {0}'.format(percentage))
+    self._log_verbose('speed_percentage: {0}'.format(percentage))
     if percentage < 0:
       percentage = 0
     if percentage > 100:
@@ -120,46 +146,36 @@ class SwiftAPIExtended(SwiftAPI):
     return self
 
   def acceleration(self, acceleration):
-    self.log_verbose('acceleration: {0}'.format(acceleration))
+    self._log_verbose('acceleration: {0}'.format(acceleration))
     if acceleration < UARM_MIN_ACCELERATION:
       acceleration = UARM_MIN_ACCELERATION
-      self.log_verbose('acceleration changed to: {0}'.format(acceleration))
+      self._log_verbose('acceleration changed to: {0}'.format(acceleration))
     if acceleration > UARM_MAX_ACCELERATION:
       acceleration = UARM_MAX_ACCELERATION
-      self.log_verbose('acceleration changed to: {0}'.format(acceleration))
+      self._log_verbose('acceleration changed to: {0}'.format(acceleration))
     self._acceleration = acceleration
     self.set_acceleration(acc=self._acceleration)
     return self
 
-  def read_and_save_position(self):
-    self.log_verbose('read_and_save_position')
+  def update_position(self):
+    self._log_verbose('update_position')
     pos = self.get_position(wait=True)
     self._pos = {'x': pos[0], 'y': pos[1], 'z': pos[2]}
-    self.log_verbose('New Position: {0}'.format(self._pos))
-
-  '''
-  LEVEL 1 COMMANDS
-  '''
-
-  def home(self, mode='general'):
-    self.log_verbose('home')
-    self.flush_cmd()
-    self.wait()
-    self.set_speed_factor(1.0)
-    self.mode_general()
-    self.reset(speed=self._speed, wait=True)
-    self.speed(self._speed)
-    self.acceleration(self._acceleration)
-    time.sleep(0.05)
-    self.read_and_save_position()
+    self._log_verbose('New Position: {0}'.format(self._pos))
     return self
 
-  def move_to(self, x=None, y=None, z=None, wait=False):
-    self.log_verbose('move_to: x={0}, y={1}, z={2}'.format(x, y, z))
-    if x < UARM_X_MIN:
-      x = UARM_X_MIN
+  @property
+  def position(self):
+    return self._pos
+
+  '''
+  ATOMIC COMMANDS
+  '''
+
+  def move_to(self, x=None, y=None, z=None):
+    self._log_verbose('move_to: x={0}, y={1}, z={2}'.format(x, y, z))
     self.set_position(
-      x=x, y=y, z=z, relative=False, speed=self._speed, wait=wait)
+      x=x, y=y, z=z, relative=False, speed=self._speed)
     if x is not None:
       self._pos['x'] = x
     if y is not None:
@@ -168,9 +184,9 @@ class SwiftAPIExtended(SwiftAPI):
       self._pos['z'] = z
     return self
 
-  def move_relative(self, x=None, y=None, z=None, wait=False):
-    self.log_verbose('move_relative: x={0}, y={1}, z={2}'.format(x, y, z))
-    kwargs = {'wait': wait}
+  def move_relative(self, x=None, y=None, z=None):
+    self._log_verbose('move_relative: x={0}, y={1}, z={2}'.format(x, y, z))
+    kwargs = {}
     if x is not None:
       kwargs['x'] = x + self._pos['x']
     if y is not None:
@@ -182,40 +198,68 @@ class SwiftAPIExtended(SwiftAPI):
     self.move_to(**kwargs)
     return self
 
-  def disable_motor_base(self):
-    self.log_verbose('disable_motor_base')
-    self.set_servo_detach(self._motor_ids['base'])
+  def rotate_to(self, angle=UARM_DEFAULT_WRIST_ANGLE,
+                sleep=UARM_DEFAULT_WRIST_SLEEP, wait=True):
+    self._log_verbose('rotate_to')
+    if angle < UARM_MIN_WRIST_ANGLE:
+      angle = UARM_MIN_WRIST_ANGLE
+      self._log_verbose('angle changed to: {0}'.format(angle))
+    if angle > UARM_MAX_WRIST_ANGLE:
+      angle = UARM_MAX_WRIST_ANGLE
+      self._log_verbose('angle changed to: {0}'.format(angle))
+    self._wrist_angle = angle
+    # previous move command will return before it has arrived at destination
+    if wait:
+      self.wait_for_arrival()
+    # speed has no affect, b/c servo motors are controlled by PWM
+    # so from the device's perspective, the change is instantaneous
+    self.set_wrist(angle=angle)
+    time.sleep(sleep)
     return self
 
-  def disable_motor_all(self):
-    self.log_verbose('disable_motor_all')
-    self.set_servo_detach(None)
+  def rotate_relative(self, angle=0, sleep=UARM_DEFAULT_WRIST_SLEEP,
+                      wait=True):
+    self._log_verbose('rotate_relative')
+    angle = self._wrist_angle + angle
+    self.rotate_to(angle=angle, sleep=sleep, wait=wait)
+    return self
+
+  def disable_motor_base(self):
+    self._log_verbose('disable_motor_base')
+    self.set_servo_detach(self._motor_ids['base'], wait=True)
+    return self
+
+  def disable_all_motors(self):
+    self._log_verbose('disable_all_motors')
+    self.set_servo_detach(None, wait=True)
     return self
 
   def enable_motor_base(self):
-    self.log_verbose('enable_motor_base')
-    self.set_servo_attach(self._motor_ids['base'])
-    read_and_save_position()
+    self._log_verbose('enable_motor_base')
+    self.set_servo_attach(self._motor_ids['base'], wait=True)
+    # update position, b/c no way to know where we are
+    self.update_position()
     return self
 
-  def enable_motor_all(self):
-    self.log_verbose('enable_motor_all')
-    self.set_servo_attach(None)
-    read_and_save_position()
+  def enable_all_motors(self):
+    self._log_verbose('enable_all_motors')
+    self.set_servo_attach(None, wait=True)
+    # update position, b/c no way to know where we are
+    self.update_position()
     return self
 
   '''
-  LEVEL 2 COMMANDS
+  COMBINATORY COMMANDS
   '''
 
-  def safe_disable_motors(self):
-    self.log_verbose('safe_disable_motors')
-    old_speed = float(self._speed)
-    old_accel = float(self._acceleration)
-    self.speed(UARM_SAFE_SPEED)
-    self.acceleration(UARM_SAFE_ACCELERATION)
-    self.move_to(**UARM_SAFE_POS)
-    self.speed(old_speed)
-    self.acceleration(old_accel)
-    self.disable_motor_all()
+  def home(self, mode='general'):
+    self._log_verbose('home')
+    _speed = float(self._speed)
+    _accel = float(self._acceleration)
+    self.speed(UARM_HOME_SPEED)
+    self.acceleration(UARM_HOME_ACCELERATION)
+    self.rotate_to(UARM_DEFAULT_WRIST_ANGLE)
+    self.move_to(**UARM_HOME_POS)
+    self.speed(_speed)
+    self.acceleration(_accel)
     return self
