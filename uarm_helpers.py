@@ -27,16 +27,27 @@ UARM_DEFAULT_WRIST_ANGLE = 90
 UARM_DEFAULT_WRIST_SLEEP = 0.25
 
 # PUMP & GRIP
-UARM_DEFAULT_PUMP_SLEEP = 0
-UARM_DEFAULT_GRIP_SLEEP = 0
+UARM_DEFAULT_PUMP_SLEEP = {True: 0.2, False: 0.2}
+UARM_DEFAULT_GRIP_SLEEP = {True: 0, False: 2.0}
 UARM_HOLDING_CODES = ['off', 'empty', 'holding']
+
+# COORDINATE MODES
+UARM_MODE_TO_CODE = {
+  'general': 0,
+  # 'laser': 1,
+  # '3d_printer': 2,
+  'pen_gripper': 3
+}
+UARM_CODE_TO_MODE = {
+  val: key
+  for key, val in UARM_MODE_TO_CODE.items()
+}
 
 # HOMING
 UARM_HOME_SPEED = 10
 UARM_HOME_ACCELERATION = 1.3
-UARM_HOME_POS = {
-  'x': 110, 'y': 0, 'z': 40
-}
+UARM_HOME_ORDER = [0, 1, 2] # base=0, shoulder=1, elbow=2
+UARM_HOME_ANGLE = [90.0, 118, 50]
 
 # PROBING
 UARM_DEFAULT_PROBE_SPEED = 10
@@ -84,13 +95,8 @@ def uarm_scan_and_connect(verbose=False, verbose_serial=False):
 class SwiftAPIExtended(SwiftAPI):
 
   def __init__(self, **kwargs):
-    self._mode = UARM_DEFAULT_MODE
-    self._mode_codes = {
-      'general': 0,
-      'laser': 1,
-      '3d_printer': 2,
-      'pen_gripper': 3
-    }
+    self._mode_str = UARM_DEFAULT_MODE
+    self._mode_code = UARM_MODE_TO_CODE[self._mode_str]
     self._motor_ids = {
       'base': 0,
       'shoulder': 1,
@@ -103,7 +109,6 @@ class SwiftAPIExtended(SwiftAPI):
     self._pos = {'x': 0, 'y': 0, 'z': 0} # run self.home() to get real position
     super().__init__(**kwargs) # raises Exception if port is incorrect
     self.setup()
-    self.update_position()
 
   def _log_verbose(self, msg):
     if self._verbose:
@@ -118,7 +123,7 @@ class SwiftAPIExtended(SwiftAPI):
     self.flush_cmd()
     self.waiting_ready()
     self.set_speed_factor(1.0)
-    self.mode(self._mode)
+    self.mode(self._mode_str)
     return self
 
   def wait_for_arrival(self, timeout=5):
@@ -136,11 +141,13 @@ class SwiftAPIExtended(SwiftAPI):
         self._pos, timeout))
 
   def mode(self, new_mode):
-    self._log_verbose('mode_general')
-    if new_mode not in self._mode_codes.keys():
+    self._log_verbose('mode: {0}'.format(new_mode))
+    if new_mode not in UARM_MODE_TO_CODE.keys():
       raise ValueError('Unknown mode: {0}'.format(new_mode))
-    self._mode = new_mode
-    self.set_mode(self._mode_codes[self._mode])
+    self._mode_str = new_mode
+    self._mode_code = UARM_MODE_TO_CODE[self._mode_str]
+    self.set_mode(UARM_MODE_TO_CODE[self._mode_str])
+    self.update_position()
     return self
 
   def speed(self, speed):
@@ -268,39 +275,31 @@ class SwiftAPIExtended(SwiftAPI):
     self.update_position()
     return self
 
-  def pump(self, enable, sleep=UARM_DEFAULT_PUMP_SLEEP):
+  def pump(self, enable, sleep=None):
     self._log_verbose('pump: {0}'.format(enable))
-    ret = self.set_pump(enable)
+    if self._mode_str != 'general':
+      raise RuntimeError(
+        'Must be in \"general\" to user pump')
+    ret = self.set_pump(enable, wait=True, check=True)
+    if sleep is None:
+      sleep = UARM_DEFAULT_PUMP_SLEEP[enable]
     time.sleep(sleep)
     return self
 
-  def grip(self, enable, sleep=UARM_DEFAULT_GRIP_SLEEP):
+  def grip(self, enable, sleep=None):
     self._log_verbose('grip: {0}'.format(enable))
-    ret = self.set_gripper(enable)
+    if self._mode_str != 'pen_gripper':
+      raise RuntimeError(
+        'Must be in \"pen_gripper\" to user gripper')
+    ret = self.set_gripper(enable, wait=True, check=True)
+    if sleep is None:
+      sleep = UARM_DEFAULT_GRIP_SLEEP[enable]
     time.sleep(sleep)
     return self
-
-  def is_holding(self):
-    self._log_verbose('is_holding')
-    if self._mode != 'general' and self._mode != 'gripper':
-      raise RuntimeError(
-        'Must be in \"general\" or \"gripper\" to test if holding something')
-    methods = {
-      'general': self.get_pump_status, 'gripper': self.get_gripper_catch}
-    ret_code = methods[self._mode]()
-    self._log_verbose('is_holding ret_code={0}'.format(ret_code))
-    if ret_code < 0 or ret_code > len(UARM_HOLDING_CODES):
-      raise RuntimeError(
-        'Got unknown response when checking if holding something: {0}'.format(
-          ret_code))
-    if UARM_HOLDING_CODES[ret_code] == 'holding':
-      return True
-    else:
-      return False
 
   def is_pressing(self):
     self._log_verbose('is_pressing')
-    if self._mode != 'general':
+    if self._mode_str != 'general':
       raise RuntimeError(
         'Must be in \"general\" mode to test if pressing something')
     return self.get_limit_switch(wait=True)
@@ -316,13 +315,19 @@ class SwiftAPIExtended(SwiftAPI):
     self.speed(UARM_HOME_SPEED)
     self.acceleration(UARM_HOME_ACCELERATION)
     self.rotate_to(UARM_DEFAULT_WRIST_ANGLE)
-    self.move_to(**UARM_HOME_POS)
+    # move to the "safe" position, where it is safe to disable all motors
+    # using angles ensures it's the same regardless of mode (coordinate system)
+    for m_id in UARM_HOME_ORDER:
+      self.set_servo_angle(servo_id=m_id, angle=UARM_HOME_ANGLE[m_id], wait=True)
     self.speed(_speed)
     self.acceleration(_accel)
+    # b/c using servo angles, Python has lost track of where XYZ are
+    time.sleep(0.25) # give it an extra time to ensure position is settled
+    self.update_position()
     return self
 
   def probe(self, step=UARM_DEFAULT_PROBE_STEP, speed=UARM_DEFAULT_PROBE_SPEED):
-    self._log_verbose('home')
+    self._log_verbose('probe')
     _speed = float(self._speed)
     self.speed(speed)
     # move down until we hit the limit switch
