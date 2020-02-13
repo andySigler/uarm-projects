@@ -2,7 +2,7 @@ import time
 
 from uarm_helpers import uarm_scan_and_connect
 
-swift = uarm_scan_and_connect(verbose=True);
+swift = uarm_scan_and_connect();
 swift.home()
 
 swift.move_relative(x=50).move_relative(z=100)
