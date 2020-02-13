@@ -18,7 +18,7 @@ UARM_DEFAULT_SPEED = UARM_MAX_SPEED / 2
 # ACCELERATION
 UARM_MAX_ACCELERATION = 50
 UARM_MIN_ACCELERATION = 0.01
-UARM_DEFAULT_ACCELERATION = 10
+UARM_DEFAULT_ACCELERATION = 5
 
 # WRIST ANGLE
 UARM_MIN_WRIST_ANGLE = 0
@@ -187,7 +187,11 @@ class SwiftAPIExtended(SwiftAPI):
   def update_position(self):
     self._log_verbose('update_position')
     pos = self.get_position(wait=True)
-    self._pos = {'x': pos[0], 'y': pos[1], 'z': pos[2]}
+    self._pos = {
+      'x': round(pos[0], 2),
+      'y': round(pos[1], 2),
+      'z': round(pos[2], 2)
+    }
     self._log_verbose('New Position: {0}'.format(self._pos))
     return self
 
@@ -201,25 +205,24 @@ class SwiftAPIExtended(SwiftAPI):
 
   def move_to(self, x=None, y=None, z=None):
     self._log_verbose('move_to: x={0}, y={1}, z={2}'.format(x, y, z))
-    self.set_position(
-      x=x, y=y, z=z, relative=False, speed=self._speed)
     if x is not None:
-      self._pos['x'] = x
+      self._pos['x'] = round(x, 2)
     if y is not None:
-      self._pos['y'] = y
+      self._pos['y'] = round(y, 2)
     if z is not None:
-      self._pos['z'] = z
+      self._pos['z'] = round(z, 2)
+    self.set_position(relative=False, speed=self._speed, **self._pos)
     return self
 
   def move_relative(self, x=None, y=None, z=None):
     self._log_verbose('move_relative: x={0}, y={1}, z={2}'.format(x, y, z))
     kwargs = {}
     if x is not None:
-      kwargs['x'] = x + self._pos['x']
+      kwargs['x'] = round(x + self._pos['x'], 2)
     if y is not None:
-      kwargs['y'] = y + self._pos['y']
+      kwargs['y'] = round(y + self._pos['y'], 2)
     if z is not None:
-      kwargs['z'] = z + self._pos['z']
+      kwargs['z'] = round(z + self._pos['z'], 2)
     # using only absolute movements, because accelerations do not seem to take
     # affect when using relative movements with the API
     self.move_to(**kwargs)
