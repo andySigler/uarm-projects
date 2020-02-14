@@ -10,6 +10,13 @@ UARM_USB_HWID = '2341:0042'
 # MODE (end-tool)
 UARM_DEFAULT_MODE = 'general'
 
+UARM_MOTOR_IDS = {
+  'base': 0,
+  'shoulder': 1,
+  'elbow': 2,
+  'wrist': 3
+}
+
 # SPEED
 UARM_MAX_SPEED = 250
 UARM_MIN_SPEED = 1
@@ -46,6 +53,7 @@ UARM_CODE_TO_MODE = {
 # HOMING
 UARM_HOME_SPEED = 10
 UARM_HOME_ACCELERATION = 1.3
+UARM_HOME_START_POS = {'x': 200, 'y': 0, 'z': 150}
 UARM_HOME_ORDER = [0, 1, 2] # base=0, shoulder=1, elbow=2
 UARM_HOME_ANGLE = [90.0, 118, 50]
 
@@ -97,16 +105,11 @@ class SwiftAPIExtended(SwiftAPI):
   def __init__(self, **kwargs):
     self._mode_str = UARM_DEFAULT_MODE
     self._mode_code = UARM_MODE_TO_CODE[self._mode_str]
-    self._motor_ids = {
-      'base': 0,
-      'shoulder': 1,
-      'elbow': 2,
-      'wrist': 3
-    }
     self._speed = UARM_DEFAULT_SPEED
     self._acceleration = UARM_DEFAULT_ACCELERATION
     self._wrist_angle = UARM_DEFAULT_WRIST_ANGLE
     self._pos = {'x': 0, 'y': 0, 'z': 0} # run self.home() to get real position
+    self._enabled = True # when connecting, the uArm always enables motors
     super().__init__(**kwargs) # raises Exception if port is incorrect
     self.setup()
 
@@ -187,6 +190,9 @@ class SwiftAPIExtended(SwiftAPI):
   def update_position(self):
     self._log_verbose('update_position')
     pos = self.get_position(wait=True)
+    if pos is None:
+      print('Not able to read position, out of bounds')
+      return self
     self._pos = {
       'x': round(pos[0], 2),
       'y': round(pos[1], 2),
@@ -197,7 +203,7 @@ class SwiftAPIExtended(SwiftAPI):
 
   @property
   def position(self):
-    return self._pos
+    return self._pos.copy()
 
   '''
   ATOMIC COMMANDS
@@ -205,13 +211,17 @@ class SwiftAPIExtended(SwiftAPI):
 
   def move_to(self, x=None, y=None, z=None):
     self._log_verbose('move_to: x={0}, y={1}, z={2}'.format(x, y, z))
+    if self._enabled == False:
+      self.enable_all_motors()
+    new_pos = self._pos.copy()
     if x is not None:
-      self._pos['x'] = round(x, 2)
+      new_pos['x'] = round(x, 2)
     if y is not None:
-      self._pos['y'] = round(y, 2)
+      new_pos['y'] = round(y, 2)
     if z is not None:
-      self._pos['z'] = round(z, 2)
-    self.set_position(relative=False, speed=self._speed, **self._pos)
+      new_pos['z'] = round(z, 2)
+    self.set_position(relative=False, speed=self._speed, **new_pos)
+    self._pos = new_pos
     return self
 
   def move_relative(self, x=None, y=None, z=None):
@@ -254,26 +264,22 @@ class SwiftAPIExtended(SwiftAPI):
     self.rotate_to(angle=angle, sleep=sleep, wait=wait)
     return self
 
-  def disable_motor_base(self):
-    self._log_verbose('disable_motor_base')
-    self.set_servo_detach(self._motor_ids['base'], wait=True)
+  def disable_base(self):
+    self._log_verbose('disable_base')
+    self.set_servo_detach(UARM_MOTOR_IDS['base'], wait=True)
+    self._enabled = False
     return self
 
   def disable_all_motors(self):
     self._log_verbose('disable_all_motors')
     self.set_servo_detach(None, wait=True)
-    return self
-
-  def enable_motor_base(self):
-    self._log_verbose('enable_motor_base')
-    self.set_servo_attach(self._motor_ids['base'], wait=True)
-    # update position, b/c no way to know where we are
-    self.update_position()
+    self._enabled = False
     return self
 
   def enable_all_motors(self):
     self._log_verbose('enable_all_motors')
     self.set_servo_attach(None, wait=True)
+    self._enabled = True
     # update position, b/c no way to know where we are
     self.update_position()
     return self
@@ -283,7 +289,7 @@ class SwiftAPIExtended(SwiftAPI):
     if self._mode_str != 'general':
       raise RuntimeError(
         'Must be in \"general\" to user pump')
-    ret = self.set_pump(enable, wait=True, check=True)
+    ret = self.set_pump(enable)
     if sleep is None:
       sleep = UARM_DEFAULT_PUMP_SLEEP[enable]
     time.sleep(sleep)
@@ -311,12 +317,15 @@ class SwiftAPIExtended(SwiftAPI):
   COMBINATORY COMMANDS
   '''
 
-  def home(self, mode='general'):
+  def home(self):
     self._log_verbose('home')
     _speed = float(self._speed)
     _accel = float(self._acceleration)
     self.speed(UARM_HOME_SPEED)
     self.acceleration(UARM_HOME_ACCELERATION)
+    # move to a know absolute position first, or else the follow
+    # servo-angle commands will act unpredictably
+    self.move_to(**UARM_HOME_START_POS).wait_for_arrival()
     self.rotate_to(UARM_DEFAULT_WRIST_ANGLE)
     # move to the "safe" position, where it is safe to disable all motors
     # using angles ensures it's the same regardless of mode (coordinate system)
