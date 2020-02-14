@@ -18,9 +18,10 @@ UARM_MOTOR_IDS = {
 }
 
 # SPEED
-UARM_MAX_SPEED = 250
+UARM_DEFAULT_SPEED_FACTOR = 0.007
+UARM_MAX_SPEED = 600
 UARM_MIN_SPEED = 1
-UARM_DEFAULT_SPEED = UARM_MAX_SPEED / 2
+UARM_DEFAULT_SPEED = 150
 
 # ACCELERATION
 UARM_MAX_ACCELERATION = 50
@@ -51,7 +52,7 @@ UARM_CODE_TO_MODE = {
 }
 
 # HOMING
-UARM_HOME_SPEED = 10
+UARM_HOME_SPEED = 200
 UARM_HOME_ACCELERATION = 1.3
 UARM_HOME_START_POS = {'x': 200, 'y': 0, 'z': 150}
 UARM_HOME_ORDER = [0, 1, 2] # base=0, shoulder=1, elbow=2
@@ -125,23 +126,23 @@ class SwiftAPIExtended(SwiftAPI):
     self._log_verbose('setup')
     self.flush_cmd()
     self.waiting_ready()
-    self.set_speed_factor(1.0)
+    self.set_speed_factor(UARM_DEFAULT_SPEED_FACTOR)
     self.mode(self._mode_str)
     return self
 
-  def wait_for_arrival(self, timeout=5):
+  def wait_for_arrival(self, timeout=10, set_pos=True):
     self._log_verbose('wait')
     start_time = time.time()
     self.waiting_ready(timeout=timeout)
     while time.time() - start_time < timeout:
       # sending these commands while moving will make uArm much less smooth
-      self.move_to(**self._pos)
-      time.sleep(0.2)
+      if set_pos:
+        self.move_to(**self._pos)
+      time.sleep(0.02)
       if not self.get_is_moving(wait=True):
         return self
     raise TimeoutError(
-      'Unable to reach target position {0} within {1} seconds'.format(
-        self._pos, timeout))
+      'Unable to arrive within {1} seconds'.format(timeout))
 
   def mode(self, new_mode):
     self._log_verbose('mode: {0}'.format(new_mode))
@@ -220,7 +221,8 @@ class SwiftAPIExtended(SwiftAPI):
       new_pos['y'] = round(y, 2)
     if z is not None:
       new_pos['z'] = round(z, 2)
-    self.set_position(relative=False, speed=self._speed, **new_pos)
+    speed_mm_per_min = self._speed * 60
+    self.set_position(relative=False, speed=speed_mm_per_min, **new_pos)
     self._pos = new_pos
     return self
 
@@ -300,7 +302,7 @@ class SwiftAPIExtended(SwiftAPI):
     if self._mode_str != 'pen_gripper':
       raise RuntimeError(
         'Must be in \"pen_gripper\" to user gripper')
-    ret = self.set_gripper(enable, wait=True, check=True)
+    ret = self.set_gripper(enable)
     if sleep is None:
       sleep = UARM_DEFAULT_GRIP_SLEEP[enable]
     time.sleep(sleep)
@@ -331,6 +333,7 @@ class SwiftAPIExtended(SwiftAPI):
     # using angles ensures it's the same regardless of mode (coordinate system)
     for m_id in UARM_HOME_ORDER:
       self.set_servo_angle(servo_id=m_id, angle=UARM_HOME_ANGLE[m_id], wait=True)
+    self.wait_for_arrival(set_pos=False)
     self.speed(_speed)
     self.acceleration(_accel)
     # b/c using servo angles, Python has lost track of where XYZ are
@@ -347,3 +350,6 @@ class SwiftAPIExtended(SwiftAPI):
       self.move_relative(z=-step).wait_for_arrival()
     self.speed(_speed)
     return self
+
+  def sleep(self):
+    self.home().disable_all_motors()
