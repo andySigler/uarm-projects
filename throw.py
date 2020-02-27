@@ -39,7 +39,7 @@ def throw_ball(bot, spec):
     bot.pump(False)
 
 
-swift = uarm_scan_and_connect();
+swift = uarm_scan_and_connect()
 
 if input('Type any letter then ENTER to home: '):
     swift.home()
