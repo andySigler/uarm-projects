@@ -107,7 +107,9 @@ class SwiftAPIExtended(SwiftAPI):
     self._mode_str = UARM_DEFAULT_MODE
     self._mode_code = UARM_MODE_TO_CODE[self._mode_str]
     self._speed = UARM_DEFAULT_SPEED
+    self._pushed_speed = [UARM_DEFAULT_SPEED]
     self._acceleration = UARM_DEFAULT_ACCELERATION
+    self._pushed_acceleration = [UARM_DEFAULT_ACCELERATION]
     self._wrist_angle = UARM_DEFAULT_WRIST_ANGLE
     self._pos = {'x': 0, 'y': 0, 'z': 0} # run self.home() to get real position
     self._enabled = True # when connecting, the uArm always enables motors
@@ -128,6 +130,20 @@ class SwiftAPIExtended(SwiftAPI):
     self.waiting_ready()
     self.set_speed_factor(UARM_DEFAULT_SPEED_FACTOR)
     self.mode(self._mode_str)
+    return self
+
+  def push_settings(self):
+    self._pushed_speed.append(float(self._speed))
+    self._pushed_acceleration.append(float(self._acceleration))
+    return self
+
+  def pop_settings(self):
+    if len(self._pushed_speed) == 0 or len(self._pushed_acceleration) == 0:
+      raise RuntimeError('Cannot "pop" settings when none have been "pushed"')
+    self.speed(float(self._pushed_speed[-1]))
+    self._pushed_speed = self._pushed_speed[:-1]
+    self.acceleration(float(self._pushed_acceleration[-1]))
+    self._pushed_acceleration = self._pushed_acceleration[:-1]
     return self
 
   def wait_for_arrival(self, timeout=10, set_pos=True):
@@ -321,8 +337,7 @@ class SwiftAPIExtended(SwiftAPI):
 
   def home(self):
     self._log_verbose('home')
-    _speed = float(self._speed)
-    _accel = float(self._acceleration)
+    self.push_settings()
     self.speed(UARM_HOME_SPEED)
     self.acceleration(UARM_HOME_ACCELERATION)
     # move to a know absolute position first, or else the follow
@@ -334,8 +349,7 @@ class SwiftAPIExtended(SwiftAPI):
     for m_id in UARM_HOME_ORDER:
       self.set_servo_angle(servo_id=m_id, angle=UARM_HOME_ANGLE[m_id], wait=True)
     self.wait_for_arrival(set_pos=False)
-    self.speed(_speed)
-    self.acceleration(_accel)
+    self.pop_settings()
     # b/c using servo angles, Python has lost track of where XYZ are
     time.sleep(0.25) # give it an extra time to ensure position is settled
     self.update_position()
@@ -343,12 +357,12 @@ class SwiftAPIExtended(SwiftAPI):
 
   def probe(self, step=UARM_DEFAULT_PROBE_STEP, speed=UARM_DEFAULT_PROBE_SPEED):
     self._log_verbose('probe')
-    _speed = float(self._speed)
+    self.push_settings()
     self.speed(speed)
     # move down until we hit the limit switch
     while not self.is_pressing():
       self.move_relative(z=-step).wait_for_arrival()
-    self.speed(_speed)
+    self.pop_settings()
     return self
 
   def sleep(self):
