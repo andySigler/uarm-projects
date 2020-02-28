@@ -17,6 +17,18 @@ UARM_MOTOR_IDS = {
   'wrist': 3
 }
 
+# MIN/MAX POSITIONS
+UARM_POSITION_MIN = {
+  'x': 110,
+  'y': -350,
+  'z': -100 # not sure what this should be exactly
+}
+UARM_POSITION_MAX = {
+  'x': 330,
+  'y': 350,
+  'z': 150
+}
+
 # SPEED
 UARM_DEFAULT_SPEED_FACTOR = 0.007
 UARM_MAX_SPEED = 600
@@ -153,7 +165,7 @@ class SwiftAPIExtended(SwiftAPI):
     while time.time() - start_time < timeout:
       # sending these commands while moving will make uArm much less smooth
       if set_pos:
-        self.move_to(**self._pos)
+        self.move_to(check=False, **self._pos)
       time.sleep(0.02)
       if not self.get_is_moving(wait=True):
         return self
@@ -226,7 +238,7 @@ class SwiftAPIExtended(SwiftAPI):
   ATOMIC COMMANDS
   '''
 
-  def move_to(self, x=None, y=None, z=None):
+  def move_to(self, x=None, y=None, z=None, check=True):
     self._log_verbose('move_to: x={0}, y={1}, z={2}'.format(x, y, z))
     if self._enabled == False:
       self.enable_all_motors()
@@ -237,6 +249,14 @@ class SwiftAPIExtended(SwiftAPI):
       new_pos['y'] = round(y, 2)
     if z is not None:
       new_pos['z'] = round(z, 2)
+    if check:
+      for ax in UARM_POSITION_MIN.keys():
+        min_ax = UARM_POSITION_MIN[ax]
+        max_ax = UARM_POSITION_MAX[ax]
+        if new_pos[ax] <= min_ax or new_pos[ax] >= max_ax:
+          raise RuntimeError(
+            'Unable to reach {0} axis to position {1}'.format(
+              ax.upper(), new_pos[ax]))
     speed_mm_per_min = self._speed * 60
     self.set_position(relative=False, speed=speed_mm_per_min, **new_pos)
     self._pos = new_pos
@@ -342,7 +362,7 @@ class SwiftAPIExtended(SwiftAPI):
     self.acceleration(UARM_HOME_ACCELERATION)
     # move to a know absolute position first, or else the follow
     # servo-angle commands will act unpredictably
-    self.move_to(**UARM_HOME_START_POS).wait_for_arrival()
+    self.move_to(check=False, **UARM_HOME_START_POS).wait_for_arrival()
     self.rotate_to(UARM_DEFAULT_WRIST_ANGLE)
     # move to the "safe" position, where it is safe to disable all motors
     # using angles ensures it's the same regardless of mode (coordinate system)
