@@ -1,4 +1,5 @@
 import json
+import utime
 
 import sensor
 
@@ -20,12 +21,16 @@ sensor.set_auto_whitebal(True)
 def get_crop_coords(img):
     crop_percentage_x = 0.2
     crop_percentage_y = 0.15
+    crop_offset_x = -0.05
+    crop_offset_y = 0.05
     coords = {
         'x': int(img.width() * crop_percentage_x),
         'y': int(img.height() * crop_percentage_y)
     }
     coords['w'] = img.width() - (coords['x'] * 2)
     coords['h'] = img.height() - (coords['y'] * 2)
+    coords['x'] += int(img.width() * crop_offset_x)
+    coords['y'] += int(img.height() * crop_offset_y)
     return coords
 
 
@@ -66,7 +71,7 @@ def is_image_moving(stats, prev_stats, hist, count):
         min_diff = abs(stats.min() - prev_stats.min())
         med_diff = abs(stats.median() - prev_stats.median())
         stdev_diff = abs(stats.stdev() - prev_stats.stdev())
-        if max([mean_diff, min_diff, med_diff, stdev_diff]) > 3:
+        if max([mean_diff, min_diff, med_diff, stdev_diff]) > 15:
             is_moving = True
     if not is_moving:
         perc_low = hist.get_percentile(0.25).value()
@@ -176,6 +181,10 @@ def print_state(is_empty, is_moving, reg_stats):
 
 prev_stats = None
 still_count = 0
+region_filled_state = [False for i in range(9)]
+region_filled_prev_state = [False for i in range(9)]
+region_stable_counts = [0 for i in range(9)]
+region_stable_thresh = 5
 while(True):
     img, stats, hist = read_image()
     is_empty = is_image_empty(stats)
@@ -186,8 +195,27 @@ while(True):
     if not is_empty and not is_moving:
         img = auto_binary(img)
         reg_stats = get_regions(img)
+
+        ## low-pass filter on the region states
+        #for i in range(9):
+            ## count each time the state is the same as previous state
+            #if region_filled_prev_state[i] == reg_stats[i]['filled']:
+                #region_stable_counts[i] += 1
+            #else:
+                #is_moving = True
+                #region_stable_counts[i] = 0 # reset the counter
+            ## if it's been stable long enough, use the value just read
+            #if region_stable_counts[i] >= region_stable_thresh:
+                #region_stable_counts[i] = region_stable_thresh
+                #region_filled_state[i] = reg_stats[i]['filled'];
+            ## store previous state
+            #region_filled_prev_state[i] = reg_stats[i]['filled']
+            ## update with our stabilized state
+            #reg_stats[i]['filled'] = region_filled_state[i]
+
         draw_regions(img, reg_stats)
     print_state(is_empty, is_moving, reg_stats)
+    utime.sleep_ms(500)
 
 
 

@@ -12,7 +12,7 @@ from uarm_helpers import uarm_scan_and_connect
 
 # Z position of where pen touches paper
 # found through `find_paper_height()`
-paper_height = 20
+paper_height = 24
 
 # position where the camera can observe the entire drawing surface
 observer_pos = {'x': 145, 'y': 0, 'z': 140}
@@ -28,6 +28,28 @@ play_grid = {
     'center': {'x': 180, 'y': 0, 'z': paper_height},
     'square_size': 30
 }
+
+num_squares = 9
+empty_mark = 0
+user_mark = 1
+uarm_mark = 2
+
+# get region locations based on the grid location/size
+# first is top-left, last is bottom-right
+# also, remember the XY axis are reversed on the uArm :(
+region_locations = [play_grid['center'].copy() for i in range(num_squares)]
+region_locations[0]['y'] += play_grid['square_size']
+region_locations[3]['y'] += play_grid['square_size']
+region_locations[6]['y'] += play_grid['square_size']
+region_locations[2]['y'] -= play_grid['square_size']
+region_locations[5]['y'] -= play_grid['square_size']
+region_locations[8]['y'] -= play_grid['square_size']
+region_locations[0]['x'] += play_grid['square_size']
+region_locations[1]['x'] += play_grid['square_size']
+region_locations[2]['x'] += play_grid['square_size']
+region_locations[6]['x'] -= play_grid['square_size']
+region_locations[7]['x'] -= play_grid['square_size']
+region_locations[8]['x'] -= play_grid['square_size']
 
 
 def find_camera_port():
@@ -52,12 +74,20 @@ def close_camera_port(port):
     port.close()
 
 
-def read_camera_port(port):
-    port.reset_input_buffer()
+def read_camera_port(port, retries=3):
+    while port.in_waiting:
+        port.readline()
     data = port.readline()
+    print(data)
     if data:
-        return json.loads(data)
-    return None
+        try:
+            return json.loads(data)
+        except json.decoder.JSONDecodeError as e:
+            print('Error parsing data from port')
+            print(data)
+            if retries == 0:
+                raise e
+    return read_camera_port(port, retries=retries - 1)
 
 
 def find_paper_height(bot):
@@ -203,33 +233,121 @@ def draw_playing_grid(bot):
     draw_shape(swift, grid_points)
 
 
+def get_number_mismatch(old_regions, new_regions):
+    old_regions = [bool(v) for v in old_regions]
+    if len(old_regions) != len(new_regions):
+        raise RuntimeError(
+            'Number old ({0}) doesnt match number new ({1})'.format(
+                len(old_regions), len(new_regions)))
+    mismatch_indexes = []
+    for i in range(len(old_regions)):
+        if old_regions[i] != new_regions[i]:
+            mismatch_indexes.append(int(i))
+    return len(mismatch_indexes)
+
+
+def convert_camera_regions(old_regions, new_regions, empy_mark, user_mark):
+    converted_regions = []
+    for i, v in enumerate(old_regions):
+        if new_regions[i]:
+            if old_regions[i] != empy_mark:
+                converted_regions.append(int(old_regions[i])) # copy old value
+            else:
+                converted_regions.append(user_mark) # user drew the mark
+        else:
+            converted_regions.append(empy_mark) # it's empty
+    return converted_regions
+
+
+def get_region_to_draw(regions):
+    # TODO: randomize the square
+    # TODO: make selection "smart"
+    for i in range(len(regions)):
+        if regions[i] == 0:
+            return i
+
+
+def draw_mark_on_region(bot, region_idx, mark):
+    loc = region_locations[region_idx].copy()
+    loc['z'] = paper_height
+    coords = None
+    if mark.lower() == 'x':
+        coords = get_cross_coords(loc, play_grid['square_size'] / 2)
+    elif mark.lower() == 'o':
+        coords = get_circle_coords(loc, play_grid['square_size'] / 2)
+    else:
+        raise RuntimeError('Unknown marking: {0}'.format(mark))
+    draw_shape(bot, coords)
+
+
 def wait_for_instructions(swift, camera):
-    swift.move_to(**observer_pos).rotate_to(wrist_centered_angle)
     open_camera_port(camera)
+    game_state = {
+        'regions': [empty_mark for i in range(num_squares)],
+    }
+    just_started = True
     while True:
-        '''
-        Read camera to determine:
+        # move to the top each time, and get the state from the camera
+        swift.move_to(**observer_pos).rotate_to(wrist_centered_angle)
+        swift.wait_for_arrival()
+        state = read_camera_port(camera)
 
-            1) what squares have dark marks inside them
-            2) when there is movement
-            3) when the game state has updated since last move
+        # do nothing while there's movement
+        if state['moving']:
+            continue
 
-        Using data from above:
+        # nothing is drawn, so draw a grid
+        if state['empty']:
+            just_started = False
+            print('Drawing Grid')
+            draw_playing_grid(swift)
+            game_state['regions'] = [empty_mark for i in range(num_squares)]
+            print('\n\n\n\n')
+            continue
 
-            1) when to make next move
-            2) what the next move is
-            3) center coordinate for the next move
+        # make sure we're not starting with a previously started game
+        total_drawn = sum([1 if v else 0 for v in state['regions']])
+        if total_drawn > 0 and just_started:
+            print('Please start with an empty playing space. Waiting...')
+            swift.move_to(**observer_pos).rotate_to(wrist_centered_angle)
+            swift.wait_for_arrival()
+            while not state['empty'] or state['moving']:
+                state = read_camera_port(camera)
+            print('Thank you, playing space is now empty')
+            print('\n\n\n\n')
+            continue
 
-        Send instructions to uArm, either:
+        # wait for 1 region to not match, then assume it's a user's marking
+        num_mismatch = get_number_mismatch(
+            game_state['regions'], state['regions'])
+        if num_mismatch == 0 and total_drawn > 0:
+            continue
+        elif num_mismatch > 1:
+            print('Too many regions mismatch {0}'.format(num_mismatch))
+            print('Current State');
+            print(game_state['regions'])
+            print('Camera State');
+            print(state['regions'])
+            print('\n\n\n\n')
+            continue
 
-            1) draw an X or O at specified coordinate
-            2) draw a finishing line from one coordinate to another
-        '''
-        pass
+        # get the next move to make, and draw a mark in that region
+        game_state['regions'] = convert_camera_regions(
+            game_state['regions'], state['regions'], empty_mark, user_mark)
+        region_idx = get_region_to_draw(game_state['regions'])
+        draw_mark_on_region(swift, region_idx, 'x')
+        game_state['regions'][region_idx] = uarm_mark;
+        print('\n\n\n\n')
 
 
 camera = create_camera_port()
 swift = setup_uarm()
 atexit.register(swift.sleep)
+
+if input('Press any key to enter camera monitor mode'):
+    swift.move_to(**observer_pos).rotate_to(wrist_centered_angle)
+    swift.wait_for_arrival()
+    while True:
+        pass
 
 wait_for_instructions(swift, camera)
