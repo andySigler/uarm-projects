@@ -1,6 +1,7 @@
 import atexit
 import json
 import math
+import random
 import sys
 import time
 
@@ -10,9 +11,15 @@ import serial
 sys.path.append('../..')
 from uarm_helpers import uarm_scan_and_connect
 
+# speeds
+move_speed = 100
+move_accel = 3
+draw_speed = 20
+draw_accel = 3
+
 # Z position of where pen touches paper
 # found through `find_paper_height()`
-paper_height = 24
+paper_height = 11
 
 # position where the camera can observe the entire drawing surface
 observer_pos = {'x': 145, 'y': 0, 'z': 140}
@@ -51,6 +58,32 @@ region_locations[6]['x'] -= play_grid['square_size']
 region_locations[7]['x'] -= play_grid['square_size']
 region_locations[8]['x'] -= play_grid['square_size']
 
+print_output_format = '''
+***********
+{0}  | {1} |  {2}
+-----------
+{3}  | {4} |  {5}
+-----------
+{6}  | {7} |  {8}
+***********'''
+
+mark_to_char = {
+    empty_mark: ' ',
+    uarm_mark: 'x',
+    user_mark: 'o'
+}
+
+winning_sequences = [
+    (0, 1, 2), # top
+    (0, 4, 8), # cross
+    (0, 3, 6), # left
+    (1, 4, 7), # center-vertical
+    (2, 5, 8), # right
+    (2, 4, 6), # cross
+    (3, 4, 5), # center-horizontal
+    (6, 7, 8)  # bottom
+]
+
 
 def find_camera_port():
     return '/dev/tty.usbmodem0000000000111'
@@ -65,6 +98,8 @@ def create_camera_port():
 
 
 def open_camera_port(port):
+    if port.is_open:
+        return
     port.open()
     port.reset_input_buffer()
 
@@ -125,20 +160,25 @@ def get_cross_coords(center, radius, angle=0):
     return points
 
 
-def get_circle_coords(center, radius, line_length=3):
+def get_circle_coords(center, radius, line_length=3, start_rad=0, end_rad=None):
     two_pi = 2 * math.pi
+    thresh_radian = two_pi
+    if end_rad is not None:
+        while end_rad <= 0:
+            end_rad += two_pi
+        thresh_radian = end_rad
     circum = radius * two_pi
-    radian_step = two_pi * (line_length / circum)
-    curr_radian = 0
+    draw_length = circum * (thresh_radian / two_pi)
+    radian_step = two_pi * (line_length / draw_length)
+    curr_radian = start_rad
     points = []
-    while curr_radian < two_pi:
+    while curr_radian <= thresh_radian:
         p = center.copy()
         p['x'] += radius * math.sin(curr_radian)
         p['y'] += radius * math.cos(curr_radian)
         p['drawing'] = True
         points.append(p)
         curr_radian += radian_step
-    points.append(points[0].copy())
     return points
 
 
@@ -164,9 +204,9 @@ def get_grid_coords(center, square_size):
 
     points = [
         # line
-        {'x': left, 'y': center['y'] + center_offset, 'z': touch_z, 'drawing': True},
         {'x': right, 'y': center['y'] + center_offset, 'z': touch_z, 'drawing': True},
-        {'x': right, 'y': center['y'] + center_offset, 'z': hover_z}, # lift up
+        {'x': left, 'y': center['y'] + center_offset, 'z': touch_z, 'drawing': True},
+        {'x': left, 'y': center['y'] + center_offset, 'z': hover_z}, # lift up
         # line
         {'x': right, 'y': center['y'] - center_offset, 'z': hover_z}, # move
         {'x': right, 'y': center['y'] - center_offset, 'z': touch_z, 'drawing': True},
@@ -189,8 +229,8 @@ def adjust_speed_during_drawing(bot, point, settings_pushed):
     if point.get('drawing'):
         if not settings_pushed:
             bot.push_settings()
-            bot.speed(20)
-            bot.acceleration(3)
+            bot.speed(draw_speed)
+            bot.acceleration(draw_accel)
         return True
     elif settings_pushed:
         bot.pop_settings()
@@ -213,16 +253,18 @@ def draw_shape(bot, points):
     bot.move_to(**hover_pos)
 
 
+def reset_uarm(bot):
+    bot.speed(move_speed)
+    bot.acceleration(move_accel)
+    bot.rotate_to(wrist_centered_angle)
+
+
 def setup_uarm():
     global paper_height
     bot = uarm_scan_and_connect()
-    bot.speed(100).acceleration(3).rotate_to(wrist_centered_angle)
     if input('Type any letter then ENTER to home: '):
         bot.home()
-    if input('Type any letter then ENTER to find paper: '):
-        paper_height = find_paper_height(bot)
-        print('Paper height is: {0}'.format(paper_height))
-        time.sleep(1)
+    reset_uarm(bot)
     return bot
 
 
@@ -241,7 +283,8 @@ def get_number_mismatch(old_regions, new_regions):
                 len(old_regions), len(new_regions)))
     mismatch_indexes = []
     for i in range(len(old_regions)):
-        if old_regions[i] != new_regions[i]:
+        # only detect changes from False -> True
+        if not old_regions[i] and new_regions[i]:
             mismatch_indexes.append(int(i))
     return len(mismatch_indexes)
 
@@ -260,27 +303,243 @@ def convert_camera_regions(old_regions, new_regions, empy_mark, user_mark):
 
 
 def get_region_to_draw(regions):
-    # TODO: randomize the square
-    # TODO: make selection "smart"
-    for i in range(len(regions)):
-        if regions[i] == 0:
-            return i
+
+    # sort by number of empty-markings
+    def _get_mode_mark_of_seq_idx(seq_idxs):
+        # return the mode of the region values
+        # these should only have either two values, EMPTY or UARM/USER marking
+        seq_vals = [regions[s_idx] for s_idx in seq_idxs]
+        return max(seq_vals, key=seq_vals.count)
+
+
+    def _reduce_to_winners_or_possible_winners(winner_seqs):
+        has_winner = False
+        winners_list = []
+        if len(winner_seqs):
+            for seq_idxs in winner_seqs:
+                if _get_mode_mark_of_seq_idx(seq_idxs) != empty_mark:
+                    has_winner = True
+                    winners_list.append(seq_idxs)
+        if has_winner:
+            winner_seqs = winners_list
+        random.shuffle(winner_seqs)  # randomized shuffle of indices
+        return winner_seqs, has_winner
+
+
+    def _get_empty_idx(seq_idxs):
+        empty_idxs = []
+        for idx in seq_idxs:
+            if regions[idx] == empty_mark:
+                empty_idxs.append(idx)
+        if not len(empty_idxs):
+            return None
+        random.shuffle(empty_idxs)  # randomized shuffle of indices
+        return empty_idxs[0]
+
+
+    # loop through each uarm/user marked region
+    uarm_winners = []
+    user_winners = []
+    for r_idx, val in enumerate(regions):
+        for seq_idxs in winning_sequences:
+            if r_idx == seq_idxs[0]:
+                seq_vals = [regions[s_idx] for s_idx in seq_idxs]
+                # get list of possible winning sequences
+                if user_mark not in seq_vals:
+                    uarm_winners.append(seq_idxs)
+                if uarm_mark not in seq_vals:
+                    user_winners.append(seq_idxs)
+
+    uarm_winners, _ = _reduce_to_winners_or_possible_winners(uarm_winners)
+    user_winners, user_has_winner = _reduce_to_winners_or_possible_winners(user_winners)
+
+    if user_has_winner:
+        # play defense
+        return _get_empty_idx(user_winners[0])
+    elif len(uarm_winners):
+        # play offense
+        return _get_empty_idx(uarm_winners[0])
+    else:
+        # no possible winner, pick randomly from empty regions
+        return _get_empty_idx([i for i in range(num_squares)])
 
 
 def draw_mark_on_region(bot, region_idx, mark):
     loc = region_locations[region_idx].copy()
     loc['z'] = paper_height
     coords = None
+    mark_radius = play_grid['square_size'] * 0.25
     if mark.lower() == 'x':
-        coords = get_cross_coords(loc, play_grid['square_size'] / 2)
+        coords = get_cross_coords(loc, mark_radius)
     elif mark.lower() == 'o':
-        coords = get_circle_coords(loc, play_grid['square_size'] / 2)
+        coords = get_circle_coords(loc, mark_radius)
     else:
         raise RuntimeError('Unknown marking: {0}'.format(mark))
     draw_shape(bot, coords)
 
 
-def wait_for_instructions(swift, camera):
+def draw_winning_line(bot, win_idxs):
+    min_idx = min(win_idxs)
+    max_idx = max(win_idxs)
+    min_loc = region_locations[min_idx].copy()
+    max_loc = region_locations[max_idx].copy()
+    min_loc['z'] = paper_height
+    max_loc['z'] = paper_height
+    points = get_line_coords(min_loc, max_loc)
+    draw_shape(bot, points)
+
+
+def draw_face(bot, regions, happy):
+    empty_idxs = [i for i, r in enumerate(regions) if r == empty_mark]
+    face_loc = None
+    if len(empty_idxs):
+        random.shuffle(empty_idxs)
+        face_loc = region_locations[empty_idxs[0]].copy()
+    else:
+        face_loc = region_locations[-2]
+        face_loc['x'] -= play_grid['square_size']
+    face_loc['z'] = paper_height
+
+    face_radius = play_grid['square_size'] * 0.3
+    eye_x_offset = face_radius * 0.3
+    eye_y_offset = face_radius * 0.3
+    eye_height = face_radius * 0.25
+    mouth_radius = face_radius * 0.6
+
+    circle_coords = get_circle_coords(face_loc, face_radius)
+    draw_shape(bot, circle_coords)
+
+    eye_left_center = face_loc.copy()
+    eye_left_center['x'] -= eye_x_offset
+    eye_left_center['y'] += eye_y_offset
+    eye_left_top = eye_left_center.copy()
+    eye_left_bottom = eye_left_center.copy()
+    eye_left_top['x'] += (eye_height / 2)
+    eye_left_bottom['x'] -= (eye_height / 2)
+    eye_left_points = get_line_coords(eye_left_top, eye_left_bottom)
+    draw_shape(bot, eye_left_points)
+
+    eye_right_center = face_loc.copy()
+    eye_right_center['x'] -= eye_x_offset
+    eye_right_center['y'] -= eye_y_offset
+    eye_right_top = eye_right_center.copy()
+    eye_right_bottom = eye_right_center.copy()
+    eye_right_top['x'] += (eye_height / 2)
+    eye_right_bottom['x'] -= (eye_height / 2)
+    eye_right_points = get_line_coords(eye_right_top, eye_right_bottom)
+    draw_shape(bot, eye_right_points)
+
+    mouth_center = face_loc.copy()
+    if not happy:
+        mouth_center['x'] += mouth_radius
+    mouth_start = math.pi * 0
+    mouth_end = math.pi * 1
+    if not happy:
+        mouth_start, mouth_end = mouth_end, mouth_start
+    mouth_coords = get_circle_coords(
+        mouth_center, mouth_radius, line_length=2,
+        start_rad=mouth_start, end_rad=mouth_end)
+    draw_shape(bot, mouth_coords)
+
+
+def monitor_grid(bot):
+    bot.move_to(**observer_pos)
+    bot.rotate_to(wrist_centered_angle)
+    bot.wait_for_arrival()
+
+
+def are_regions_full(regions):
+    for r in regions:
+        if not r:
+            return False
+    return True
+
+
+def are_regions_empty(regions):
+    for r in regions:
+        if r:
+            return False
+    return True
+
+
+def get_winner_indices(regions):
+    # go through each region
+    for idx, m in enumerate(regions):
+        # for the region, go through each sequence
+        for seq in winning_sequences:
+            # if the region matches the sequences first spot, test it
+            if idx == seq[0] and m != empty_mark:
+                # count all the matching regions in the sequence
+                matches = sum([1 if regions[i] == m else 0 for i in seq])
+                # if all the regions match, it's a winner
+                if matches == len(seq):
+                    return seq
+    return None
+
+
+def print_regions(regions):
+    region_marks = [mark_to_char[v] for v in regions]
+    print(print_output_format.format(*region_marks))
+
+
+def run_cli_game():
+    regions = [empty_mark for i in range(num_squares)]
+    uarm_turn = True
+    while True:
+        if uarm_turn:
+            bot_idx = get_region_to_draw(regions)
+            regions[bot_idx] = uarm_mark
+            uarm_turn = False
+        else:
+            input_msg = 'Enter index to draw a mark (0 - {0}): '
+            res = input(input_msg.format(num_squares - 1))
+            try:
+                user_idx = int(res)
+                regions[user_idx] = user_mark
+                uarm_turn = True
+            except Exception as e:
+                print(e)
+        print_regions(regions)
+        win_idx = get_winner_indices(regions)
+        if win_idx or are_regions_full(regions):
+            if win_idx:
+                m = mark_to_char[regions[win_idx[0]]]
+                print('{0} is the winner! -> {1}'.format(m, win_idx))
+            else:
+                print('No winner, restarting game')
+            regions = [empty_mark for i in range(num_squares)]
+            uarm_turn = True
+
+
+def auto_mode(swift, camera):
+
+    def _wait_for_empty(state):
+        print('Please start with an empty playing space. Waiting...')
+        monitor_grid(swift)
+        while not state['empty'] or state['moving']:
+            time.sleep(0.5)
+            state = read_camera_port(camera)
+        print('Thank you, playing space is now empty')
+
+
+    def _test_and_react_to_end_game(regions, state):
+        win_idx = get_winner_indices(regions)
+        if win_idx or are_regions_full(regions):
+            print('Game is over')
+            if win_idx:
+                win_mark = regions[win_idx[0]]
+                print('{0} is the winner!'.format(mark_to_char[win_mark]))
+                draw_winning_line(swift, win_idx)
+                happy = (win_mark == uarm_mark)
+                draw_face(swift, regions, happy)
+            else:
+                print('No winner!')
+                draw_face(swift, regions, False)
+            _wait_for_empty(state)
+            return True
+        return False
+
+
     open_camera_port(camera)
     game_state = {
         'regions': [empty_mark for i in range(num_squares)],
@@ -288,8 +547,8 @@ def wait_for_instructions(swift, camera):
     just_started = True
     while True:
         # move to the top each time, and get the state from the camera
-        swift.move_to(**observer_pos).rotate_to(wrist_centered_angle)
-        swift.wait_for_arrival()
+        monitor_grid(swift)
+        time.sleep(0.5)
         state = read_camera_port(camera)
 
         # do nothing while there's movement
@@ -299,22 +558,21 @@ def wait_for_instructions(swift, camera):
         # nothing is drawn, so draw a grid
         if state['empty']:
             just_started = False
-            print('Drawing Grid')
             draw_playing_grid(swift)
             game_state['regions'] = [empty_mark for i in range(num_squares)]
-            print('\n\n\n\n')
-            continue
+            # HACK: overwrite camera state, to force it to immediately
+            #       start drawing it's first mark, without first rising up
+            state['empty'] = False
+            state['moving'] = True
+            state['regions'] = [empty_mark for i in range(num_squares)]
 
         # make sure we're not starting with a previously started game
         total_drawn = sum([1 if v else 0 for v in state['regions']])
-        if total_drawn > 0 and just_started:
-            print('Please start with an empty playing space. Waiting...')
-            swift.move_to(**observer_pos).rotate_to(wrist_centered_angle)
-            swift.wait_for_arrival()
-            while not state['empty'] or state['moving']:
-                state = read_camera_port(camera)
-            print('Thank you, playing space is now empty')
-            print('\n\n\n\n')
+        if just_started:
+            if total_drawn == 0:
+                just_started = False
+            else:
+                _wait_for_empty(state)
             continue
 
         # wait for 1 region to not match, then assume it's a user's marking
@@ -328,26 +586,68 @@ def wait_for_instructions(swift, camera):
             print(game_state['regions'])
             print('Camera State');
             print(state['regions'])
-            print('\n\n\n\n')
             continue
 
-        # get the next move to make, and draw a mark in that region
+        # update regions from the camera
         game_state['regions'] = convert_camera_regions(
             game_state['regions'], state['regions'], empty_mark, user_mark)
+        print_regions(game_state['regions'])
+
+        # did the user just end the game?
+        if _test_and_react_to_end_game(game_state['regions'], state):
+            just_started = True
+            continue
+
+        # uarm makes it's move
         region_idx = get_region_to_draw(game_state['regions'])
         draw_mark_on_region(swift, region_idx, 'x')
-        game_state['regions'][region_idx] = uarm_mark;
-        print('\n\n\n\n')
+        game_state['regions'][region_idx] = uarm_mark; # update regions
+        print_regions(game_state['regions'])
+
+        # did the uarm just end the game?
+        if _test_and_react_to_end_game(game_state['regions'], state):
+            just_started = True
+            continue
 
 
-camera = create_camera_port()
-swift = setup_uarm()
-atexit.register(swift.sleep)
-
-if input('Press any key to enter camera monitor mode'):
-    swift.move_to(**observer_pos).rotate_to(wrist_centered_angle)
-    swift.wait_for_arrival()
+def manual_mode(bot, camera):
     while True:
-        pass
+        monitor_grid(bot)
+        msg = 'G (grid), H (home), R (read camera), XN (x-mark), ON (o-mark)'
+        res = input(msg)
+        if not res:
+            continue
+        cmd = res.lower()[0]
+        idx = res.lower()[-1]
+        if cmd == 'g':
+            draw_playing_grid(bot)
+        elif cmd == 'h':
+            bot.home()
+            reset_uarm(bot)
+        elif cmd == 'r':
+            open_camera_port(camera)
+            print(read_camera_port(camera))
+        elif cmd == 'x' or cmd == 'o':
+            try:
+                idx = int(res.lower()[-1])
+                draw_mark_on_region(bot, idx, cmd)
+            except Exception as e:
+                print(e)
 
-wait_for_instructions(swift, camera)
+
+if __name__ == "__main__":
+    input_msg = 'Type any letter then ENTER to {0}: '
+    if input(input_msg.format('simulate a game')):
+        run_cli_game()
+    camera = create_camera_port()
+    swift = setup_uarm()
+    atexit.register(swift.sleep)
+    if input(input_msg.format('find paper height')):
+        paper_height = find_paper_height(swift)
+        print('Paper height is: {0}'.format(paper_height))
+        time.sleep(1) # wait a second for hand to move away from uArm
+        monitor_grid(swift)
+    elif input(input_msg.format('use auto-mode')):
+        auto_mode(swift, camera)
+    else:
+        manual_mode(swift, camera)

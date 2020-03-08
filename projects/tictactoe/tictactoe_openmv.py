@@ -21,8 +21,8 @@ sensor.set_auto_whitebal(True)
 def get_crop_coords(img):
     crop_percentage_x = 0.2
     crop_percentage_y = 0.15
-    crop_offset_x = -0.05
-    crop_offset_y = 0.05
+    crop_offset_x = -0.04  # changes if the camera moves at all
+    crop_offset_y = 0.025  # changes if the camera moves at all
     coords = {
         'x': int(img.width() * crop_percentage_x),
         'y': int(img.height() * crop_percentage_y)
@@ -133,7 +133,7 @@ def get_region_coords(img):
     return regions
 
 
-def get_regions(img, mean_thresh=240):
+def get_regions(img, mean_thresh=250):
     region_coords = get_region_coords(img)
     stats = []
     for c in region_coords:
@@ -181,10 +181,6 @@ def print_state(is_empty, is_moving, reg_stats):
 
 prev_stats = None
 still_count = 0
-region_filled_state = [False for i in range(9)]
-region_filled_prev_state = [False for i in range(9)]
-region_stable_counts = [0 for i in range(9)]
-region_stable_thresh = 5
 while(True):
     img, stats, hist = read_image()
     is_empty = is_image_empty(stats)
@@ -195,27 +191,8 @@ while(True):
     if not is_empty and not is_moving:
         img = auto_binary(img)
         reg_stats = get_regions(img)
-
-        ## low-pass filter on the region states
-        #for i in range(9):
-            ## count each time the state is the same as previous state
-            #if region_filled_prev_state[i] == reg_stats[i]['filled']:
-                #region_stable_counts[i] += 1
-            #else:
-                #is_moving = True
-                #region_stable_counts[i] = 0 # reset the counter
-            ## if it's been stable long enough, use the value just read
-            #if region_stable_counts[i] >= region_stable_thresh:
-                #region_stable_counts[i] = region_stable_thresh
-                #region_filled_state[i] = reg_stats[i]['filled'];
-            ## store previous state
-            #region_filled_prev_state[i] = reg_stats[i]['filled']
-            ## update with our stabilized state
-            #reg_stats[i]['filled'] = region_filled_state[i]
-
         draw_regions(img, reg_stats)
     print_state(is_empty, is_moving, reg_stats)
-    utime.sleep_ms(500)
 
 
 
