@@ -7,9 +7,7 @@ import time
 
 import serial
 
-# relative import
-sys.path.append('../..')
-from uarm_helpers import uarm_scan_and_connect
+from uarm import uarm_scan_and_connect
 
 # speeds
 move_speed = 100

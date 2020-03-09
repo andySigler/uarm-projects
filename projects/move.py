@@ -1,9 +1,12 @@
 import math
+import os
+import sys
 import time
 
-from uarm_helpers import uarm_scan_and_connect
+from uarm import uarm_create, uarm_scan_and_connect
 
-swift = uarm_scan_and_connect();
+# swift = uarm_scan_and_connect();
+swift = uarm_create(simulate=True);
 
 swift.home()
 

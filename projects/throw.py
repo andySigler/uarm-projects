@@ -1,7 +1,10 @@
 import math
 import time
 
-from uarm_helpers import uarm_scan_and_connect
+from uarm import uarm_create, uarm_scan_and_connect
+
+# swift = uarm_scan_and_connect();
+swift = uarm_create(simulate=True);
 
 
 ball_pos = {'x': 117, 'y': -64, 'z': 50}
