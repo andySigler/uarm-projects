@@ -9,6 +9,9 @@ import serial
 
 from uarm import uarm_scan_and_connect
 
+sys.path.append('..')
+from projects_utils import openmv_port
+
 # speeds
 move_speed = 100
 move_accel = 3
@@ -81,46 +84,6 @@ winning_sequences = [
     (3, 4, 5), # center-horizontal
     (6, 7, 8)  # bottom
 ]
-
-
-def find_camera_port():
-    return '/dev/tty.usbmodem0000000000111'
-
-
-def create_camera_port():
-    port = serial.Serial()
-    port.baudrate = 115200
-    port.port = find_camera_port()
-    port.timeout = 2
-    return port
-
-
-def open_camera_port(port):
-    if port.is_open:
-        return
-    port.open()
-    port.reset_input_buffer()
-
-
-def close_camera_port(port):
-    port.reset_input_buffer()
-    port.close()
-
-
-def read_camera_port(port, retries=3):
-    while port.in_waiting:
-        port.readline()
-    data = port.readline()
-    print(data)
-    if data:
-        try:
-            return json.loads(data)
-        except json.decoder.JSONDecodeError as e:
-            print('Error parsing data from port')
-            print(data)
-            if retries == 0:
-                raise e
-    return read_camera_port(port, retries=retries - 1)
 
 
 def find_paper_height(bot):
@@ -516,7 +479,7 @@ def auto_mode(swift, camera):
         monitor_grid(swift)
         while not state['empty'] or state['moving']:
             time.sleep(0.5)
-            state = read_camera_port(camera)
+            state = camera.read_json()
         print('Thank you, playing space is now empty')
 
 
@@ -538,7 +501,6 @@ def auto_mode(swift, camera):
         return False
 
 
-    open_camera_port(camera)
     game_state = {
         'regions': [empty_mark for i in range(num_squares)],
     }
@@ -547,7 +509,7 @@ def auto_mode(swift, camera):
         # move to the top each time, and get the state from the camera
         monitor_grid(swift)
         time.sleep(0.5)
-        state = read_camera_port(camera)
+        state = camera.read_json()
 
         # do nothing while there's movement
         if state['moving']:
@@ -623,8 +585,7 @@ def manual_mode(bot, camera):
             bot.home()
             reset_uarm(bot)
         elif cmd == 'r':
-            open_camera_port(camera)
-            print(read_camera_port(camera))
+            print(camera.read_json())
         elif cmd == 'x' or cmd == 'o':
             try:
                 idx = int(res.lower()[-1])
@@ -637,7 +598,7 @@ if __name__ == "__main__":
     input_msg = 'Type any letter then ENTER to {0}: '
     if input(input_msg.format('simulate a game')):
         run_cli_game()
-    camera = create_camera_port()
+    camera = openmv_port.OpenMVPort()
     swift = setup_uarm()
     atexit.register(swift.sleep)
     if input(input_msg.format('find paper height')):
