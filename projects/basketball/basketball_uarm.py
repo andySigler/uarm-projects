@@ -1,11 +1,8 @@
 import atexit
-import json
-import math
 import sys
 import time
 
 import serial
-
 from uarm import uarm_create, uarm_scan_and_connect
 
 sys.path.append('..')
@@ -28,8 +25,8 @@ def pick_up_ball(bot, ball_pos, hover=20, shuffle_step=3):
     bot.pop_settings()
 
 
-def check_if_picked_up(bot, observer_pos):
-    bot.move_to(**observer_pos).wait_for_arrival()
+def check_if_picked_up(bot, bot_pos):
+    bot.move_to(**bot_pos).wait_for_arrival()
     picked_up = True
     for i in range(3):
         cam_data = camera.read_json()
@@ -70,41 +67,30 @@ def throw_ball(bot, spec):
     bot.pop_settings()
 
 
-def get_ball_pos(camera, lookup_table, retries=3):
-    '''
-    cam_data = {
-        "empty": true || false,
-        "moving": true || false,
-        "position": {
-            "y": 0.0-1.0,
-            "x": 0.0-1.0
-        }
-    }
-    '''
-    cam_data = camera.read_json()
-    if cam_data['empty']:
-        if retries > 0:
-            return get_ball_pos(
-                camera, lookup_table, retries=retries - 1)
-        raise RuntimeError('Camera does not see a ball')
-    ball_pos = location_lookup.convert(cam_data['position'], lookup_table)
-    return ball_pos
-
-
-def can_pick_up_ball(camera):
-    cam_data = camera.read_json()
-    if cam_data['empty']:
-        return False
-    if cam_data['moving']:
-        return False
-    return True
-
-
-def wait_for_still_ball(camera, timeout=None):
+def wait_for_still_position(camera, data, timeout=None):
+    print('wait_for_still_position')
     start_time = time.time()
-    while not can_pick_up_ball(camera):
+    while data['moving'] or data['empty']:
+        if data['empty']:
+            return None
         if timeout and time.time() - start_time > timeout:
-            raise RuntimeError('Timed out waiting or ball')
+            return None
+        data = camera.read_json()
+    return data
+
+
+def move_closer_to_ball(bot, camera, data):
+    print('move_closer_to_ball')
+    # TODO: move closer to the ball, to make camera angle better
+    return data
+
+
+def get_visible_ball(camera):
+    print('get_visible_ball')
+    data = camera.read_json()
+    if data['empty']:
+        return None
+    return data
 
 
 '''
@@ -131,7 +117,9 @@ Overview:
 if __name__ == "__main__":
 
     # position where the camera can observe the most area
-    observer_pos = {'x': 145, 'y': 0, 'z': 140}
+    observer_poses = [
+        {'x': 145, 'y': 0, 'z': 140}
+    ]
 
     # touches around 39, presses hard around 34
     ball_height = 36
@@ -151,7 +139,8 @@ if __name__ == "__main__":
         swift.home()
 
     if input(input_msg.format('observe')):
-        swift.move_to(**observer_pos).wait_for_arrival().disable_base()
+        swift.move_to(**observer_poses[0]).wait_for_arrival()
+        swift.disable_base()
         while True:
             input('Press ENTER to turn pump ON: ')
             swift.pump(True)
@@ -159,17 +148,39 @@ if __name__ == "__main__":
             swift.pump(False)
 
     if input(input_msg.format('test track & pickup')):
+        obs_pos_idx = 0
         while True:
-            swift.move_to(**observer_pos).wait_for_arrival().disable_base()
-            wait_for_still_ball(camera)
-            ball_pos = get_ball_pos(camera, table)
+            # iterate through the different observer poses
+            obs_pos = observer_poses[obs_pos_idx]
+            obs_pos_idx += 1
+            if obs_pos_idx >= len(observer_poses):
+                obs_pos_idx = 0
+            swift.move_to(**obs_pos).wait_for_arrival().disable_base()
+            # see if there's a visible ball
+            cam_data = get_visible_ball(camera)
+            if not cam_data:
+                continue
+            # move closer to it to make pickup easier
+            cam_data = move_closer_to_ball(swift, camera, cam_data)
+            if not cam_data:
+                continue
+            # wait for it to be still
+            cam_data = wait_for_still_position(camera, cam_data)
+            if not cam_data:
+                continue
+            # convert camera data to actual pickup position
+            ball_pos = location_lookup.convert(
+                cam_data['position'], swift.position, table)
             ball_pos['z'] = ball_height
+            # pickup the ball
             pick_up_ball(swift, ball_pos)
-            did_pick_up = check_if_picked_up(swift, observer_pos)
+            # check with the camera it's picked up
+            did_pick_up = check_if_picked_up(swift, obs_pos)
+            # drop it
             if did_pick_up:
                 drop_ball(swift, ball_pos)
 
     if input(input_msg.format('generate lookup table')):
-        location_lookup.generate(swift, camera, table_filename)
+        location_lookup.generate(swift, camera, table_filename, observer_poses[0])
 
     swift.sleep()

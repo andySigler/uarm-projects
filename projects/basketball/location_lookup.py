@@ -2,20 +2,27 @@ import math
 import os
 
 
-def generate(bot, camera, filename):
+def generate(bot, camera, filename, bot_pos):
     cam_pos = None
     ball_pos = None
-    file_line = '{0}, {1}, {2}, {3}, {4}\n'
+    file_line = '{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}\n'
     if not os.path.exists(filename):
         with open(filename, 'w') as f:
             f.write(file_line.format(
-                'OpenMV X', 'OpenMV Y', 'uArm X', 'uArm Y', 'uArm Z'))
-    bot.move_to(**observer_pos).wait_for_arrival()
+                'OpenMV X',
+                'OpenMV Y',
+                'uArm Observer X',
+                'uArm Observer Y',
+                'uArm Observer Z',
+                'uArm Ball X',
+                'uArm Ball Y',
+                'uArm Ball Z'))
+    bot.move_to(**bot_pos).wait_for_arrival()
     while True:
         # move to the top
         res = input('c=CAM, b=BALL, s=SAVE, x=EXIT')
         if res == 'x':
-            bot.move_to(**observer_pos).wait_for_arrival()
+            bot.move_to(**bot_pos).wait_for_arrival()
             return
         if res == 'c':
             data = camera.read_json()
@@ -34,12 +41,15 @@ def generate(bot, camera, filename):
                     f.write(file_line.format(
                         cam_pos['x'],
                         cam_pos['y'],
+                        bot_pos['x'],
+                        bot_pos['y'],
+                        bot_pos['z'],
                         ball_pos['x'],
                         ball_pos['y'],
                         ball_pos['z']))
             cam_pos = None
             ball_pos = None
-            bot.move_to(**observer_pos).wait_for_arrival()
+            bot.move_to(**bot_pos).wait_for_arrival()
             continue
 
 
@@ -52,24 +62,30 @@ def load(filename):
         f.readline() # ignore the first line
         for line in f.readlines():
             line = line.strip()
-            line_list = line.split(',')
+            line_list = [float(f) for f in line.split(',')]
             openmv = line_list[:2]
-            uarm = line_list[2:]
+            uarm_observer = line_list[2:5]
+            uarm_ball = line_list[5:]
             location_lookup.append({
                 'openmv': {
-                    'x': float(openmv[0]),
-                    'y': float(openmv[1])
+                    'x': openmv[0],
+                    'y': openmv[1]
                 },
-                'uarm': {
-                    'x': float(uarm[0]),
-                    'y': float(uarm[1]),
-                    'z': float(uarm[2])
+                'uarm_observer': {
+                    'x': uarm_observer[0],
+                    'y': uarm_observer[1],
+                    'z': uarm_observer[2]
                 },
+                'uarm_ball': {
+                    'x': uarm_ball[0],
+                    'y': uarm_ball[1],
+                    'z': uarm_ball[2]
+                }
             })
     return location_lookup
 
 
-def convert(cam_pos, lookup_table):
+def convert(cam_pos, bot_pos, lookup_table):
     # sort by nearest coordinates
 
     def sort_by_distance(d):
@@ -99,8 +115,8 @@ def convert(cam_pos, lookup_table):
         openmv_diff_y = b['openmv']['y'] - a['openmv']['y']
         if openmv_diff_y == 0:
             continue
-        uarm_diff_x = b['uarm']['x'] - a['uarm']['x']
-        uarm_diff_y = b['uarm']['y'] - a['uarm']['y']
+        uarm_diff_x = b['uarm_ball']['x'] - a['uarm_ball']['x']
+        uarm_diff_y = b['uarm_ball']['y'] - a['uarm_ball']['y']
         scaler_x += uarm_diff_x / openmv_diff_x
         scaler_y += uarm_diff_y / openmv_diff_y
         count += 1
@@ -111,7 +127,17 @@ def convert(cam_pos, lookup_table):
     openmv_offset_y = cam_pos['y'] - a['openmv']['y']
     uarm_offset_x = openmv_offset_x * scaler_x
     uarm_offset_y = openmv_offset_y * scaler_y
-    real_pos = a['uarm'].copy()
-    real_pos['x'] += uarm_offset_x
-    real_pos['y'] += uarm_offset_y
-    return real_pos
+    calculated_pos = a['uarm_ball'].copy()
+    calculated_pos['x'] += uarm_offset_x
+    calculated_pos['y'] += uarm_offset_y
+    # turn into a relative movement away from the observer pos
+    # this way, it doesn't matter where the bot currently is located
+    relative_pos = {
+        ax: calculated_pos[ax] - a['uarm_observer'][ax]
+        for ax in 'xyz'
+    }
+    absolute_pos = {
+        ax: bot_pos[ax] + relative_pos[ax]
+        for ax in 'xyz'
+    }
+    return absolute_pos
