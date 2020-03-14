@@ -6,6 +6,7 @@ sensor.set_framesize(sensor.QVGA)
 sensor.skip_frames(time = 2000)
 sensor.set_auto_gain(False)
 sensor.set_auto_whitebal(False)
+sensor.set_auto_exposure(False)
 
 # combine w/ `img.rotation_corr(z_rotation=90)`
 w_x_offset = int((sensor.width() - sensor.height()) / 2)
@@ -13,7 +14,7 @@ sensor.set_windowing((w_x_offset, 0, sensor.height(), sensor.height()))
 sensor.set_hmirror(True)
 
 # update using "Tools->Machine Vision->Threshold Editor"
-blob_color_thresh = [(29, 72, 15, 78, 15, 87)]
+blob_color_thresh = [(31, 100, 21, 127, 22, 127)]
 
 w = sensor.width()
 square_size_min = int(w * 0.125)                # min size of square
@@ -40,7 +41,7 @@ def get_max_movement(prev_blobs, new_blob):
 
 while(True):
     img = sensor.snapshot()
-    #img.lens_corr(1.8)
+    img.lens_corr(1.8)
     img.rotation_corr(z_rotation=90)
     blobs = img.find_blobs(
         blob_color_thresh,
