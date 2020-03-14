@@ -1,4 +1,5 @@
 import atexit
+import math
 import sys
 import time
 
@@ -7,7 +8,6 @@ from uarm import uarm_create, uarm_scan_and_connect
 
 sys.path.append('..')
 from projects_utils import openmv_port
-import location_lookup
 
 
 def pick_up_ball(bot, ball_pos, hover=20, shuffle_step=3):
@@ -79,18 +79,102 @@ def wait_for_still_position(camera, data, timeout=None):
     return data
 
 
-def move_closer_to_ball(bot, camera, data):
-    print('move_closer_to_ball')
-    # TODO: move closer to the ball, to make camera angle better
-    return data
-
-
 def get_visible_ball(camera):
     print('get_visible_ball')
     data = camera.read_json()
     if data['empty']:
         return None
     return data
+
+
+def get_camera_to_mm_multiplier(bot, camera):
+    cam_data = get_visible_ball(camera)
+    if not cam_data:
+        return None
+    cam_data = wait_for_still_position(camera, cam_data)
+    if not cam_data:
+        return None
+    mm_test = 50
+    bot.push_settings()
+    bot.speed(50).acceleration(1)
+    rel_cam_data = {}
+    for ax in 'xy':
+        bot.move_relative(**{ax: mm_test}).wait_for_arrival()
+        time.sleep(0.25)
+        rel_cam_data[ax] = get_visible_ball(camera)
+        bot.move_relative(**{ax: -mm_test}).wait_for_arrival()
+    bot.pop_settings()
+    if not rel_cam_data['x'] or not rel_cam_data['y']:
+        return None
+    cam_diff = {
+        'x': cam_data['position']['x'] - rel_cam_data['x']['position']['x'],
+        'y': cam_data['position']['y'] - rel_cam_data['y']['position']['y']
+    }
+    cam_to_mm = {
+        'x': mm_test / cam_diff['x'],
+        'y': mm_test / cam_diff['y']
+    }
+    return cam_to_mm
+
+
+def hover_near_ball(bot, camera, cam_to_mm):
+
+    target = {
+        'x': 0.2,
+        'y': 0.5
+    }
+    target_thresh = 0.025
+    current_pos = None
+
+    def _get_cam_pos():
+        cam_data = get_visible_ball(camera)
+        if not cam_data:
+            return None
+        return cam_data['position']
+
+
+    def _get_cam_dist():
+        diff = {ax: target[ax] - current_pos[ax] for ax in 'xy'}
+        sums = sum([math.pow(t, 2) for t in diff.values()])
+        return math.sqrt(sums)
+
+
+    def _get_target_mm(step_size=1.0):
+        diff_cam = {
+            'x': target['x'] - current_pos['x'],
+            'y': target['y'] - current_pos['y']
+        }
+        diff_mm = {
+            'x': diff_cam['x'] * cam_to_mm['x'],
+            'y': diff_cam['y'] * cam_to_mm['y']
+        }
+        move_mm = {
+            'x': round(-diff_mm['x'] * step_size, 4),
+            'y': round(-diff_mm['y'] * step_size, 4)
+        }
+        return move_mm
+
+
+    current_pos = _get_cam_pos()
+    while current_pos and _get_cam_dist() > target_thresh:
+        target_mm = _get_target_mm(step_size=0.5)
+        bot.move_relative(**target_mm).wait_for_arrival()
+        current_pos = _get_cam_pos()
+
+    if not current_pos:
+        return False
+
+    # move it just slightly, so it's over the ball exactly
+    y_offset = bot.position['y'] * 0.15
+    x_offset = 25
+    final_step = {
+        'x': x_offset,
+        'y': y_offset
+    }
+    bot.move_relative(**final_step)
+    return True
+
+
 
 
 '''
@@ -117,15 +201,23 @@ Overview:
 if __name__ == "__main__":
 
     # position where the camera can observe the most area
+    x_start = 145
+    x_end = x_start + 65
+    y_offset = 120
+    z_height = 140
     observer_poses = [
-        {'x': 145, 'y': 0, 'z': 140}
+        {'x': x_start, 'y': 0, 'z': z_height},
+        {'x': x_start, 'y': y_offset / 2, 'z': z_height},
+        {'x': x_start, 'y': y_offset, 'z': z_height},
+        {'x': x_end, 'y': y_offset / 2, 'z': z_height},
+        {'x': x_end, 'y': 0, 'z': z_height},
+        {'x': x_end, 'y': -y_offset / 2, 'z': z_height},
+        {'x': x_start, 'y': -y_offset / 2, 'z': z_height}
     ]
+    cam_to_mm = {'x': 131.6, 'y': 92.6}
 
     # touches around 39, presses hard around 34
     ball_height = 36
-
-    table_filename = 'openmv_to_uarm.csv'
-    table = location_lookup.load(table_filename)
 
     camera = openmv_port.OpenMVPort(verbose=True)
 
@@ -139,48 +231,58 @@ if __name__ == "__main__":
         swift.home()
 
     if input(input_msg.format('observe')):
-        swift.move_to(**observer_poses[0]).wait_for_arrival()
-        swift.disable_base()
+        idx = 0
+        pos = observer_poses[idx]
+        swift.move_to(**pos).wait_for_arrival()
         while True:
-            input('Press ENTER to turn pump ON: ')
-            swift.pump(True)
-            input('Press ENTER to turn pump OFF: ')
-            swift.pump(False)
+            res = input('m=MOVE, t=TEST_MM, f=FOLLOW: ')
+            if res == 'm':
+                idx += 1
+                if idx >= len(observer_poses):
+                    idx = 0
+                pos = observer_poses[idx]
+                print(idx, pos)
+                swift.move_to(**pos).wait_for_arrival()
+            # if res == 't':
+            #     cam_to_mm = get_camera_to_mm_multiplier(swift, camera)
+            #     print(cam_to_mm)
+            if res == 'f':
+                if hover_near_ball(swift, camera, cam_to_mm):
+                    # move down to test
+                    swift.move_to(z=ball_height)
+                    time.sleep(1)
+                    swift.move_to(**pos).wait_for_arrival()
 
     if input(input_msg.format('test track & pickup')):
-        obs_pos_idx = 0
+        obs_pos_idx = -1
         while True:
             # iterate through the different observer poses
-            obs_pos = observer_poses[obs_pos_idx]
             obs_pos_idx += 1
             if obs_pos_idx >= len(observer_poses):
                 obs_pos_idx = 0
-            swift.move_to(**obs_pos).wait_for_arrival().disable_base()
+            obs_pos = observer_poses[obs_pos_idx]
+            swift.push_settings()
+            swift.speed(100).acceleration(1.3)
+            swift.move_to(**obs_pos).wait_for_arrival()
+            swift.pop_settings()
+            # time.sleep(1)
+            # continue
             # see if there's a visible ball
             cam_data = get_visible_ball(camera)
-            if not cam_data:
-                continue
-            # move closer to it to make pickup easier
-            cam_data = move_closer_to_ball(swift, camera, cam_data)
             if not cam_data:
                 continue
             # wait for it to be still
             cam_data = wait_for_still_position(camera, cam_data)
             if not cam_data:
                 continue
-            # convert camera data to actual pickup position
-            ball_pos = location_lookup.convert(
-                cam_data['position'], swift.position, table)
-            ball_pos['z'] = ball_height
-            # pickup the ball
-            pick_up_ball(swift, ball_pos)
-            # check with the camera it's picked up
-            did_pick_up = check_if_picked_up(swift, obs_pos)
-            # drop it
-            if did_pick_up:
-                drop_ball(swift, ball_pos)
-
-    if input(input_msg.format('generate lookup table')):
-        location_lookup.generate(swift, camera, table_filename, observer_poses[0])
-
-    swift.sleep()
+            if hover_near_ball(swift, camera, cam_to_mm):
+                # move down to test
+                ball_pos = swift.position.copy()
+                ball_pos['z'] = ball_height
+                # pickup the ball
+                pick_up_ball(swift, ball_pos)
+                # check with the camera it's picked up
+                did_pick_up = check_if_picked_up(swift, obs_pos)
+                # drop it
+                if did_pick_up:
+                    drop_ball(swift, ball_pos)
