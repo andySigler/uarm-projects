@@ -140,9 +140,14 @@ def hover_near_ball(bot, camera, cam_to_mm):
 
 
     def _get_target_mm(step_size=1.0):
+        # account for the camera's rotation
+        angle = bot.get_base_angle()
+        rotated_current_pos = current_pos.copy()
+        # TODO: actually implement this...
+        # then, stepwise, move closer to to
         diff_cam = {
-            'x': target['x'] - current_pos['x'],
-            'y': target['y'] - current_pos['y']
+            'x': target['x'] - rotated_current_pos['x'],
+            'y': target['y'] - rotated_current_pos['y']
         }
         diff_mm = {
             'x': diff_cam['x'] * cam_to_mm['x'],
@@ -165,10 +170,10 @@ def hover_near_ball(bot, camera, cam_to_mm):
         return False
 
     # move it just slightly, so it's over the ball exactly
+    # TODO: fix this Y-offset hack after implementing camera rotation above
     y_offset = bot.position['y'] * 0.15
-    x_offset = 25
     final_step = {
-        'x': x_offset,
+        'x': 25,
         'y': y_offset
     }
     bot.move_relative(**final_step)
@@ -199,6 +204,10 @@ Overview:
 
 
 if __name__ == "__main__":
+
+    # the XY position of the basketball hoop
+    # WARNING: THIS MUST NEVER CHANGE AFTER CREATING THROWING SPECS!!!
+    hoop_pos = {'x': 200, 'y': -200, 'z': 140}
 
     # position where the camera can observe the most area
     x_start = 145
@@ -285,4 +294,4 @@ if __name__ == "__main__":
                 did_pick_up = check_if_picked_up(swift, obs_pos)
                 # drop it
                 if did_pick_up:
-                    drop_ball(swift, ball_pos)
+                    drop_ball(swift, hoop_pos)
