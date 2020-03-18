@@ -1,16 +1,12 @@
-# uArm Swift Pro Test
+# uArm Projects
 
-Trying out the uArm Swift Pro
+Trying out the uArm Swift Pro, and making some example projects
 
 ## Installation
 
-Setup a Python virtual environment, if you want.
-
-Also, the `uArm-Python-SDK` recommends using Python >=3.5.x
-
-Download and install this repo, and install the forked `uArm-Python-SDK`:
+To run the projects, install this repository with git, and install the requirements:
 ```
-git clone https://github.com/andySigler/uarm-test.git
-cd uarm-test
+git clone https://github.com/andySigler/uarm-projects.git
+cd uarm-projects
 pip install -r requirements.txt
 ```

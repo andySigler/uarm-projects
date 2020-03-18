@@ -10,7 +10,7 @@ import serial
 from uarm import uarm_scan_and_connect
 
 sys.path.append('..')
-from projects_utils import openmv_port
+from utils import openmv_port
 
 # speeds
 move_speed = 100
@@ -233,7 +233,7 @@ def draw_playing_grid(bot):
     play_grid['center']['z'] = paper_height
     grid_points = get_grid_coords(
         play_grid['center'], play_grid['square_size'])
-    draw_shape(swift, grid_points)
+    draw_shape(bot, grid_points)
 
 
 def get_number_mismatch(old_regions, new_regions):
@@ -472,11 +472,11 @@ def run_cli_game():
             uarm_turn = True
 
 
-def auto_mode(swift, camera):
+def auto_mode(bot, camera):
 
     def _wait_for_empty(state):
         print('Please start with an empty playing space. Waiting...')
-        monitor_grid(swift)
+        monitor_grid(bot)
         while not state['empty'] or state['moving']:
             time.sleep(0.5)
             state = camera.read_json()
@@ -490,12 +490,12 @@ def auto_mode(swift, camera):
             if win_idx:
                 win_mark = regions[win_idx[0]]
                 print('{0} is the winner!'.format(mark_to_char[win_mark]))
-                draw_winning_line(swift, win_idx)
+                draw_winning_line(bot, win_idx)
                 happy = (win_mark == uarm_mark)
-                draw_face(swift, regions, happy)
+                draw_face(bot, regions, happy)
             else:
                 print('No winner!')
-                draw_face(swift, regions, False)
+                draw_face(bot, regions, False)
             _wait_for_empty(state)
             return True
         return False
@@ -507,7 +507,7 @@ def auto_mode(swift, camera):
     just_started = True
     while True:
         # move to the top each time, and get the state from the camera
-        monitor_grid(swift)
+        monitor_grid(bot)
         time.sleep(0.5)
         state = camera.read_json()
 
@@ -518,7 +518,7 @@ def auto_mode(swift, camera):
         # nothing is drawn, so draw a grid
         if state['empty']:
             just_started = False
-            draw_playing_grid(swift)
+            draw_playing_grid(bot)
             game_state['regions'] = [empty_mark for i in range(num_squares)]
             # HACK: overwrite camera state, to force it to immediately
             #       start drawing it's first mark, without first rising up
@@ -560,7 +560,7 @@ def auto_mode(swift, camera):
 
         # uarm makes it's move
         region_idx = get_region_to_draw(game_state['regions'])
-        draw_mark_on_region(swift, region_idx, 'x')
+        draw_mark_on_region(bot, region_idx, 'x')
         game_state['regions'][region_idx] = uarm_mark; # update regions
         print_regions(game_state['regions'])
 
@@ -599,14 +599,14 @@ if __name__ == "__main__":
     if input(input_msg.format('simulate a game')):
         run_cli_game()
     camera = openmv_port.OpenMVPort()
-    swift = setup_uarm()
-    atexit.register(swift.sleep)
+    robot = setup_uarm()
+    atexit.register(robot.sleep)
     if input(input_msg.format('find paper height')):
-        paper_height = find_paper_height(swift)
+        paper_height = find_paper_height(robot)
         print('Paper height is: {0}'.format(paper_height))
         time.sleep(1) # wait a second for hand to move away from uArm
-        monitor_grid(swift)
+        monitor_grid(robot)
     elif input(input_msg.format('use auto-mode')):
-        auto_mode(swift, camera)
+        auto_mode(robot, camera)
     else:
-        manual_mode(swift, camera)
+        manual_mode(robot, camera)
