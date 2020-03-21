@@ -10,7 +10,9 @@ from uarm import uarm_create, uarm_scan_and_connect
 sys.path.append('..')
 from utils import openmv_port
 
-from throws import get_random_throwing_spec, get_throwing_spec, test_spec_positions, HOOP_COORD
+from basketball_moves import get_random_throwing_spec, get_throwing_spec
+from basketball_moves import throw_ball, show_off
+from basketball_moves import HOOP_COORD
 
 
 def pick_up_ball(bot, ball_pos, hover=20, shuffle_step=3):
@@ -29,7 +31,10 @@ def pick_up_ball(bot, ball_pos, hover=20, shuffle_step=3):
 
 
 def check_if_picked_up(bot, bot_pos):
+    bot.push_settings()
+    bot.speed(300).acceleration(5)
     bot.move_to(**bot_pos).wait_for_arrival()
+    bot.pop_settings()
     picked_up = True
     for i in range(3):
         cam_data = camera.read_json()
@@ -46,32 +51,6 @@ def drop_ball(bot, drop_pos):
     bot.push_settings()
     bot.move_to(**drop_pos).wait_for_arrival()
     bot.pump(False, sleep=0.3)
-    bot.pop_settings()
-
-
-def throw_ball(bot, spec):
-    '''
-    {
-        'start_pos': {'x': 0, 'y': 0, 'z': 0},
-        'pause_delay': float,
-        'speed': float,
-        'acceleration': float,
-        'end_pos': {'x': 0, 'y': 0, 'z': 0},
-        'release_delay': float
-    }
-    '''
-    bot.push_settings()
-    if not bot.can_move_to(**spec['start_pos']):
-        print('Can not move to: ', spec['start_pos'])
-    elif not bot.can_move_to(**spec['end_pos']):
-        print('Can not move to: ', spec['end_pos'])
-    else:
-        bot.move_to(**spec['start_pos'], check=True).wait_for_arrival()
-        time.sleep(spec.get('pause_delay', 0))
-        bot.speed(spec['speed']).acceleration(spec['acceleration'])
-        bot.move_to(**spec['end_pos'])
-        time.sleep(spec.get('release_delay', 0))
-    bot.pump(False, sleep=0)
     bot.pop_settings()
 
 
@@ -187,7 +166,7 @@ def hover_near_ball(bot, camera, cam_to_mm):
     # TODO: fix this Y-offset hack after implementing camera rotation above
     y_offset = bot.position['y'] * 0.15
     final_step = {
-        'x': 25,
+        'x': 20,
         'y': y_offset
     }
     bot.move_relative(**final_step)
@@ -211,7 +190,7 @@ Overview:
 
 3) uarm throws ball
     - do some cool movements
-    - throw ball at hoop
+    ✓ - throw ball at hoop
     ✓ - "dunk" on the hoop
 
 '''
@@ -233,7 +212,7 @@ if __name__ == "__main__":
         {'x': x_end, 'y': -y_offset / 2, 'z': z_height},
         {'x': x_start, 'y': -y_offset / 2, 'z': z_height}
     ]
-    cam_to_mm = {'x': 131.6, 'y': 92.6}
+    cam_to_mm = {'x': 128.2051282051282, 'y': 87.71929824561403}
 
     # touches around 39, presses hard around 34
     ball_height = 36
@@ -244,53 +223,56 @@ if __name__ == "__main__":
     # robot = uarm_create(simulate=True);
     atexit.register(robot.sleep)
 
-    if not test_spec_positions(robot):
-        exit()
-
     input_msg = 'Type any letter then ENTER to {0}: '
 
     if input(input_msg.format('home')):
         robot.home()
 
-    if input(input_msg.format('observe')):
+    if input(input_msg.format('test functions')):
         idx = 0
         pos = observer_poses[idx]
         robot.move_to(**pos).wait_for_arrival()
-
+        pump_status = False
         while True:
-            res = input('m=MOVE, t=TEST_MM, f=FOLLOW, sN=TEST_SPEC:')
+            res = input('m=MOVE, t=TEST_MM, f=FOLLOW, g=SHOWOFF, sN=TEST_SPEC, p=PUMP, h=HOOP: ')
+            if res == 'h':
+                robot.move_to(**HOOP_COORD).wait_for_arrival()
+                pump_status = False
+                robot.pump(False)
+                robot.move_to(**pos).wait_for_arrival()
+            if res == 'p':
+                pump_status = not pump_status
+                robot.pump(pump_status)
             if res == 'm':
                 idx += 1
                 if idx >= len(observer_poses):
                     idx = 0
                 pos = observer_poses[idx]
-                print(idx, pos)
                 robot.move_to(**pos).wait_for_arrival()
-            # if res == 't':
-            #     cam_to_mm = get_camera_to_mm_multiplier(robot, camera)
-            #     print(cam_to_mm)
+            if res == 't':
+                cam_to_mm = get_camera_to_mm_multiplier(robot, camera)
+                print(cam_to_mm)
             if res == 'f':
                 if hover_near_ball(robot, camera, cam_to_mm):
                     # move down to test
                     robot.move_to(z=ball_height)
                     time.sleep(1)
                     robot.move_to(**pos).wait_for_arrival()
+            if res == 'g':
+                show_off(robot)
+                robot.move_to(**pos).wait_for_arrival()
             if len(res) == 2 and res[0] == 's':
                 try:
                     idx = int(res[1])
                     spec = get_throwing_spec(idx)
-                    print('SPEC:')
-                    for k, v in spec.items():
-                        print(k, ':', v)
-                    input('\nENTER to throw...')
-                    print()
-                    robot.pump(True, sleep=1)
                     throw_ball(robot, spec)
-                except:
+                    pump_status = False
+                except Exception as e:
+                    print(e)
                     pass
                 robot.move_to(**pos).wait_for_arrival()
 
-    if input(input_msg.format('test track & pickup')):
+    if input(input_msg.format('run automatically')):
         obs_pos_idx = -1
         while True:
             # iterate through the different observer poses
@@ -314,7 +296,7 @@ if __name__ == "__main__":
                 continue
             if hover_near_ball(robot, camera, cam_to_mm):
                 # move down to test
-                ball_pos = robot.position.copy()
+                ball_pos = robot.position
                 ball_pos['z'] = ball_height
                 # pickup the ball
                 pick_up_ball(robot, ball_pos)
@@ -322,8 +304,6 @@ if __name__ == "__main__":
                 did_pick_up = check_if_picked_up(robot, obs_pos)
                 # drop it
                 if did_pick_up:
-                    if random.random() < 0.1:
-                        drop_ball(robot, HOOP_COORD)
-                    else:
-                        spec = get_random_throwing_spec()
-                        throw_ball(robot, spec)
+                    show_off(robot)
+                    spec = get_random_throwing_spec()
+                    throw_ball(robot, spec)
