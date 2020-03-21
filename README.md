@@ -18,7 +18,7 @@ The project can be found found [at this link](https://github.com/andySigler/uarm
 
 See the video, click the image below:
 
-[![Tic-Tac-Toe Video](./tictactoe/tictactoe_video_image.png)](./tictactoe/tictactoe_video.mp4)
+[![Tic-Tac-Toe Video](./tictactoe/tictactoe_video_image.png)](https://andysigler.github.io/uarm-projects/tictactoe/tictactoe_video.mp4)
 
 
 # Installation
