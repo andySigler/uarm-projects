@@ -4,10 +4,6 @@ Demo projects made using the uArm Swift Pro, to have fun and explore the arm's f
 
 These are being developed as a part of a fellowship at NYU's ITP program, from February to May 2020.
 
-#### Note
-
- > I am adding videos of these projects (plus more projects) in the next couple days
-
 ##### Links
 
  - [uArm projects source code](https://github.com/andysigler/uarm-projects)
