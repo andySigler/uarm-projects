@@ -164,7 +164,7 @@ def hover_near_ball(bot, camera, cam_to_mm):
 
     # move it just slightly, so it's over the ball exactly
     # TODO: fix this Y-offset hack after implementing camera rotation above
-    y_offset = bot.position['y'] * 0.15
+    y_offset = bot.position['y'] * 0.1
     final_step = {
         'x': 20,
         'y': y_offset
@@ -199,20 +199,21 @@ Overview:
 if __name__ == "__main__":
 
     # position where the camera can observe the most area
-    x_start = 145
+    x_start = 135
     x_end = x_start + 65
     y_offset = 120
     z_height = 140
     observer_poses = [
-        {'x': x_start, 'y': 0, 'z': z_height},
+        {'x': x_start + 5, 'y': 0, 'z': z_height},
         {'x': x_start, 'y': y_offset / 2, 'z': z_height},
-        {'x': x_start, 'y': y_offset, 'z': z_height},
+        {'x': x_start, 'y': y_offset + 20, 'z': z_height},
+        {'x': x_end, 'y': y_offset + 20, 'z': z_height},
         {'x': x_end, 'y': y_offset / 2, 'z': z_height},
         {'x': x_end, 'y': 0, 'z': z_height},
         {'x': x_end, 'y': -y_offset / 2, 'z': z_height},
         {'x': x_start, 'y': -y_offset / 2, 'z': z_height}
     ]
-    cam_to_mm = {'x': 128.2051282051282, 'y': 87.71929824561403}
+    cam_to_mm = {'x': 131.57894736842104, 'y': 84.74576271186442}
 
     # touches around 39, presses hard around 34
     ball_height = 36
@@ -239,6 +240,7 @@ if __name__ == "__main__":
                 robot.move_to(**HOOP_COORD).wait_for_arrival()
                 pump_status = False
                 robot.pump(False)
+                input('ENTER to continue')
                 robot.move_to(**pos).wait_for_arrival()
             if res == 'p':
                 pump_status = not pump_status
@@ -281,7 +283,7 @@ if __name__ == "__main__":
                 obs_pos_idx = 0
             obs_pos = observer_poses[obs_pos_idx]
             robot.push_settings()
-            robot.speed(100).acceleration(1.3)
+            robot.speed(300).acceleration(5)
             robot.move_to(**obs_pos).wait_for_arrival()
             robot.pop_settings()
             # time.sleep(1)
@@ -301,9 +303,10 @@ if __name__ == "__main__":
                 # pickup the ball
                 pick_up_ball(robot, ball_pos)
                 # check with the camera it's picked up
-                did_pick_up = check_if_picked_up(robot, obs_pos)
+                did_pick_up = True
+                # did_pick_up = check_if_picked_up(robot, obs_pos)
                 # drop it
                 if did_pick_up:
                     show_off(robot)
-                    spec = get_random_throwing_spec()
+                    spec = get_throwing_spec(1)
                     throw_ball(robot, spec)

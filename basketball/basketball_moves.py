@@ -17,7 +17,8 @@ DEFAULT_SPEC = {
     'speed': UARM_MAX_SPEED,
     'acceleration': 20,
     'end_pos': HOOP_COORD.copy(),
-    'release_delay': 0.0
+    'release_delay': 0.0,
+    'wait': False
 }
 
 SPEC_LIST = []
@@ -45,11 +46,11 @@ def throw_ball(bot, spec):
     if spec['end_pos']:
         bot.speed(spec['speed']).acceleration(spec['acceleration'])
         bot.move_to(**spec['end_pos'])
+    if spec.get('wait'):
+        bot.wait_for_arrival()
     r_del = spec.get('release_delay')
     if r_del:
         time.sleep(spec.get('release_delay', 0))
-    else:
-        bot.wait_for_arrival()
     bot.pump(False, sleep=0)
     bot.pop_settings()
 
@@ -57,14 +58,14 @@ def throw_ball(bot, spec):
 def show_off(bot):
     bot.push_settings()
     bot.speed(200).acceleration(1).move_to(**SHOW_OFF_START).wait_for_arrival()
-    bot.acceleration(15)
+    bot.acceleration(10)
     time.sleep(random.random() * 0.5 + 0.25)
     counter = 0
     while counter < 20:
         start_pos = bot.position
         target_pos = get_random_show_off_pos(start_pos)
         # change speed
-        speed_max = 550
+        speed_max = 500
         speed_min = 300
         if target_pos['y'] > start_pos['y']:
             speed_max = 300
@@ -105,6 +106,9 @@ def get_random_show_off_pos(pos):
 
 dunk = copy.deepcopy(DEFAULT_SPEC)
 dunk['start_pos'] = None
+dunk['end_pos']['z'] = 160
+dunk['wait'] = True
+dunk['release_delay'] = 0.25
 SPEC_LIST.append(dunk)
 
 fast_down_center = copy.deepcopy(DEFAULT_SPEC)
@@ -133,10 +137,10 @@ if __name__ == "__main__":
 
     print('Testing all throwing spec coordinates can be ran on robot')
     for i, spec in enumerate(SPEC_LIST):
-        if not robot.can_move_to(**spec['start_pos']):
+        if spec['start_pos'] and not robot.can_move_to(**spec['start_pos']):
             raise Exception(
                 'Spec at index={0} failed: {1}', i, spec['start_pos'])
-        if not robot.can_move_to(**spec['end_pos']):
+        if spec['end_pos'] and not robot.can_move_to(**spec['end_pos']):
             raise Exception(
                 'Spec at index={0} failed: {1}', i, spec['end_pos'])
     print('PASS')

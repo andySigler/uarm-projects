@@ -25,6 +25,16 @@ See the video, click the image below:
 
 [![Tic-Tac-Toe Video](./tictactoe/tictactoe_video_image.png)](https://andysigler.github.io/uarm-projects/tictactoe/tictactoe_video.mp4)
 
+### Basketball
+
+The uArm uses it's camera and suction tool to play a solo game of basketball.
+
+The project can be found found [at this link](https://github.com/andySigler/uarm-projects/tree/master/basketball)
+
+See the video, click the image below:
+
+[![Basketball Video](./basketball/basketball_video_image.png)](https://andysigler.github.io/uarm-projects/basketball/basketball_video.mp4)
+
 
 ## Installation
 
