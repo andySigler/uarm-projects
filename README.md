@@ -8,6 +8,17 @@ These are being developed as a part of a fellowship at NYU's ITP program.
 
 The source for these project [can be found here](https://github.com/andysigler/uarm-projects), and the accompanying Python wrapper I developed [can be found here](https://github.com/andysigler/uarm-python-wrapper).
 
+## Example: Tic-Tac-Toe
+
+The uArm uses it's camera to and a marker to play tic-tac-toe with me.
+
+The project can be found found [at this link](./tictactoe)
+
+See the video, click the image below:
+
+[![Tic-Tac-Toe Video](./tictactoe/tictactoe_video_image.png)](./tictactoe/tictactoe_video.mp4)
+
+
 ## Installation
 
 To run the projects in this repo, install this repository with git, and install the requirements:
