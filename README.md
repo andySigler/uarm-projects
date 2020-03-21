@@ -1,16 +1,21 @@
 # uArm Projects
 
-#### [Note] adding videos of projects (plus more projects) in next couple days
-
 Demo projects made using the uArm Swift Pro, to have fun and explore the arm's functionality.
 
-These are being developed as a part of a fellowship at NYU's ITP program.
+These are being developed as a part of a fellowship at NYU's ITP program, from February to May 2020.
 
-The source for these project [can be found here](https://github.com/andysigler/uarm-projects), and the accompanying Python wrapper I developed [can be found here](https://github.com/andysigler/uarm-python-wrapper).
+#### Note
 
-# Projects
+ > I am adding videos of these projects (plus more projects) in the next couple days
 
-## Tic-Tac-Toe
+##### Links
+
+ - [uArm projects source code](https://github.com/andysigler/uarm-projects)
+ - [uArm Python wrapper I developed for these projects](https://github.com/andysigler/uarm-python-wrapper)
+
+## Projects
+
+### Tic-Tac-Toe
 
 The uArm uses it's camera to and a marker to play tic-tac-toe with me.
 
@@ -21,7 +26,7 @@ See the video, click the image below:
 [![Tic-Tac-Toe Video](./tictactoe/tictactoe_video_image.png)](https://andysigler.github.io/uarm-projects/tictactoe/tictactoe_video.mp4)
 
 
-# Installation
+## Installation
 
 To run the projects in this repo, install this repository with git, and install the requirements:
 ```
