@@ -13,14 +13,14 @@ sys.path.append('..')
 from utils import openmv_port
 
 # speeds
-move_speed = 100
-move_accel = 3
-draw_speed = 20
+move_speed = 400
+move_accel = 5
+draw_speed = 200
 draw_accel = 3
 
 # Z position of where pen touches paper
 # found through `find_paper_height()`
-paper_height = 11
+paper_height = 23
 
 # position where the camera can observe the entire drawing surface
 observer_pos = {'x': 145, 'y': 0, 'z': 140}
