@@ -6,4 +6,4 @@ It uses an attached OpenMV camera to see what is happening on the drawing surfac
 
 See the video, click the image below:
 
-[![Tic-Tac-Toe Video](./tictactoe_video_image.png)](./tictactoe_video.mp4)
+[![Tic-Tac-Toe Video](./tictactoe_video_image.png)](https://andysigler.github.io/uarm-projects/tictactoe/tictactoe_video.mp4)
