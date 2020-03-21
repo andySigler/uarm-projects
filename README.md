@@ -1,6 +1,6 @@
 # uArm Projects
 
-### [Note] documentation and more projects being added in the next couple days
+### [Note] adding videos of projects (plus more projects) in next couple days
 
 Demo projects made using the uArm Swift Pro, to have fun and explore the arm's functionality.
 
