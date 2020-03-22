@@ -31,6 +31,16 @@ See the video, click the image below:
 
 [![Basketball Video](./basketball/basketball_video_image.png)](https://andysigler.github.io/uarm-projects/basketball/basketball_video.mp4)
 
+### Knife Game
+
+The uArm uses (safe) plastic knife to play the knife game [from the movie Aliens](https://www.youtube.com/watch?v=3hiTlGNDH9Y).
+
+The project can be found found [at this link](https://github.com/andySigler/uarm-projects/tree/master/knife)
+
+See the video, click the image below:
+
+[![Knife Video](./knife/knife_video_image.png)](https://andysigler.github.io/uarm-projects/knife/knife_video.mp4)
+
 
 ## Installation
 
